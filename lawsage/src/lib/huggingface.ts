@@ -1,25 +1,33 @@
-import { HfInference } from '@huggingface/inference';
-
-const hf = new HfInference(import.meta.env.VITE_HUGGINGFACE_API_KEY);
+const MODEL = 'Qwen/Qwen2.5-7B-Instruct';
 
 export const generateResponse = async (input: string): Promise<string> => {
-  try {
-    const response = await hf.textGeneration({
-      model: 'microsoft/phi-2', // You can replace this with your fine-tuned model ID
-      inputs: `You are a legal AI assistant trained on Indian laws. Provide accurate and helpful information about Indian laws and legal procedures. 
-               Question: ${input}
-               Answer:`,
-      parameters: {
-        max_new_tokens: 512,
-        temperature: 0.7,
-        top_p: 0.95,
-        repetition_penalty: 1.15
-      }
-    });
+  const res = await fetch('https://router.huggingface.co/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${import.meta.env.VITE_HUGGINGFACE_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are a legal AI assistant for Indian laws. Give accurate, helpful, general legal information and mention relevant Acts and sections where possible. You do not give legal advice.',
+        },
+        { role: 'user', content: input },
+      ],
+      max_tokens: 512,
+      temperature: 0.7,
+    }),
+  });
 
-    return response.generated_text;
-  } catch (error) {
-    console.error('Error generating response:', error);
-    throw new Error('Failed to generate response. Please try again.');
+  if (!res.ok) {
+    const text = await res.text();
+    console.error('HF error', res.status, text);
+    throw new Error('Failed to generate response.');
   }
+
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content ?? '';
 };
