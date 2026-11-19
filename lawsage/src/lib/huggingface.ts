@@ -1,4 +1,4 @@
-const MODEL = 'Qwen/Qwen2.5-7B-Instruct';
+const MODEL = 'meta-llama/Llama-3.1-8B-Instruct';
 
 export const generateResponse = async (input: string): Promise<string> => {
   const res = await fetch('https://router.huggingface.co/v1/chat/completions', {
