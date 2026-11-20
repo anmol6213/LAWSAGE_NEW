@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Plus, Bookmark, Check, Pin, Trash2 } from 'lucide-react';
+import { ArrowUp, Plus, Bookmark, Check, Pin, Trash2, History, X, Copy, Scale, Landmark, Gavel, FileText } from 'lucide-react';
 import { useNavigate, useParams, useLocation, NavLink } from 'react-router-dom';
 import { supabase, ChatMessage } from '../lib/supabase';
 import { generateResponseStream } from '../lib/llm';
 import ReactMarkdown from 'react-markdown';
+import { Courthouse, Logo } from './Art';
 
 type Convo = { session_id: string; title: string; created_at: string; pinned: boolean };
 
@@ -35,6 +36,8 @@ export const Chat = () => {
   const [saved, setSaved] = useState<Set<string>>(new Set());
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const loadConvos = useCallback(async () => {
@@ -115,11 +118,10 @@ export const Chat = () => {
     else setSaved((prev) => new Set(prev).add(answer.id));
   };
 
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || loading) return;
+  const submit = async (text: string) => {
+    if (!text.trim() || loading) return;
 
-    const userMessage = input.trim();
+    const userMessage = text.trim();
     setInput('');
     setLoading(true);
 
@@ -136,7 +138,7 @@ export const Chat = () => {
     try {
       setMessages((prev) => [
         ...prev,
-        { id: aiId, content: '_Thinking..._', role: 'assistant', created_at: new Date().toISOString(), session_id: sessionId },
+        { id: aiId, content: '', role: 'assistant', created_at: new Date().toISOString(), session_id: sessionId },
       ]);
 
       const aiResponse = await generateResponseStream(userMessage, (text) => {
@@ -173,88 +175,199 @@ export const Chat = () => {
     }
   };
 
+  const sendMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    submit(input);
+  };
+
+  const copyAnswer = async (m: ChatMessage) => {
+    try {
+      await navigator.clipboard.writeText(m.content);
+      setCopied(m.id);
+      setTimeout(() => setCopied((c) => (c === m.id ? null : c)), 1500);
+    } catch {
+      /* clipboard not available */
+    }
+  };
+
+  const suggestions = [
+    { icon: Scale, title: 'Explain Article 21', text: 'Explain Article 21 of the Constitution in simple words' },
+    { icon: Gavel, title: 'What happens after an arrest?', text: 'What are my rights if I am arrested in India?' },
+    { icon: FileText, title: 'File an FIR', text: 'How do I file an FIR, and what if the police refuse?' },
+    { icon: Landmark, title: 'Fundamental rights', text: 'List the fundamental rights guaranteed by the Indian Constitution' },
+  ];
+
+  const pinnedList = convos.filter((c) => c.pinned);
+  const recentList = convos.filter((c) => !c.pinned);
+
+  const row = (c: Convo) => (
+    <div
+      key={c.session_id}
+      className={`group flex items-center rounded-lg mb-0.5 border-l-2 ${
+        c.session_id === sessionId ? 'bg-ink-800/[0.07] border-brass-500 text-ink-900' : 'border-transparent text-slate-700 hover:bg-slate-100'
+      }`}
+    >
+      <NavLink to={`/chat/${c.session_id}`} onClick={() => setShowHistory(false)} className="flex-1 min-w-0 truncate pl-3 pr-1 py-2 text-sm" title={c.title}>
+        {c.title}
+      </NavLink>
+      <button
+        onClick={() => togglePin(c)}
+        aria-label={c.pinned ? 'Unpin chat' : 'Pin chat'}
+        className={`p-1.5 rounded ${c.pinned ? 'text-brass-600' : 'text-slate-400 opacity-0 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100'} hover:text-brass-700`}
+      >
+        <Pin className={`w-4 h-4 ${c.pinned ? 'fill-current' : ''}`} />
+      </button>
+      <button
+        onClick={() => deleteChat(c)}
+        aria-label="Delete chat"
+        className="p-1.5 mr-1 rounded text-slate-400 opacity-0 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100 hover:text-red-600"
+      >
+        <Trash2 className="w-4 h-4" />
+      </button>
+    </div>
+  );
+
   return (
-    <div className="flex h-full">
-      <aside className="hidden md:flex w-64 flex-col border-r bg-white">
-        <button
-          onClick={() => navigate('/chat')}
-          className="m-3 flex items-center justify-center space-x-2 px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New chat</span>
-        </button>
-        <div className="flex-1 overflow-y-auto px-2 pb-2">
-          {convos.length === 0 && <p className="px-2 text-sm text-gray-500">No past chats yet.</p>}
-          {convos.map((c) => (
-            <div
-              key={c.session_id}
-              className={`group flex items-center rounded-lg mb-1 ${c.session_id === sessionId ? 'bg-indigo-100 text-indigo-700' : 'text-gray-700 hover:bg-gray-100'}`}
-            >
-              <NavLink to={`/chat/${c.session_id}`} className="flex-1 min-w-0 truncate px-3 py-2 text-sm" title={c.title}>
-                {c.title}
-              </NavLink>
-              <button
-                onClick={() => togglePin(c)}
-                aria-label={c.pinned ? 'Unpin' : 'Pin'}
-                className={`p-1 ${c.pinned ? 'text-indigo-600' : 'text-gray-400 opacity-0 group-hover:opacity-100 focus:opacity-100'} hover:text-indigo-700`}
-              >
-                <Pin className={`w-4 h-4 ${c.pinned ? 'fill-current' : ''}`} />
-              </button>
-              <button
-                onClick={() => deleteChat(c)}
-                aria-label="Delete chat"
-                className="p-1 mr-1 text-gray-400 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-red-600"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-          ))}
+    <div className="relative flex h-full">
+      {showHistory && <div className="fixed inset-0 z-10 bg-ink-950/40 md:hidden" onClick={() => setShowHistory(false)} aria-hidden />}
+
+      {/* History */}
+      <aside
+        className={`${showHistory ? 'flex' : 'hidden'} md:flex absolute md:static inset-y-0 left-0 z-20 w-72 md:w-72 flex-col border-r border-line bg-white shadow-lift md:shadow-none`}
+      >
+        <div className="p-3 flex items-center gap-2">
+          <button
+            onClick={() => { navigate('/chat'); setShowHistory(false); }}
+            className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-ink-800 px-3 py-2.5 text-sm font-semibold text-white hover:bg-ink-700 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            New chat
+          </button>
+          <button onClick={() => setShowHistory(false)} className="md:hidden p-2 text-slate-500" aria-label="Close history">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-2 pb-3">
+          {convos.length === 0 && <p className="px-3 py-2 text-sm text-slate-500">Your conversations will appear here.</p>}
+          {pinnedList.length > 0 && <p className="px-3 pt-2 pb-1 text-xs font-medium text-slate-500">Pinned</p>}
+          {pinnedList.map(row)}
+          {recentList.length > 0 && pinnedList.length > 0 && <p className="px-3 pt-3 pb-1 text-xs font-medium text-slate-500">Recent</p>}
+          {recentList.map(row)}
         </div>
       </aside>
 
-      <div className="flex flex-col flex-1 min-w-0 bg-gray-50">
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.map((message, i) => (
-            <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-3xl rounded-lg p-4 ${message.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white shadow-md'}`}>
-                <ReactMarkdown className="prose prose-sm max-w-none">{message.content}</ReactMarkdown>
-                {message.role === 'assistant' && !loading && !message.content.startsWith('Sorry, something went wrong') && (
-                  <button
-                    onClick={() => saveAnswer(i)}
-                    disabled={saved.has(message.id)}
-                    className="mt-2 flex items-center space-x-1 text-xs text-gray-500 hover:text-indigo-700 disabled:text-green-600"
-                  >
-                    {saved.has(message.id) ? <Check className="w-3 h-3" /> : <Bookmark className="w-3 h-3" />}
-                    <span>{saved.has(message.id) ? 'Saved' : 'Save'}</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-          <div ref={messagesEndRef} />
+      {/* Conversation */}
+      <div className="flex flex-col flex-1 min-w-0">
+        <div className="md:hidden flex items-center gap-2 px-3 py-2 border-b border-line bg-white">
+          <button onClick={() => setShowHistory(true)} className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-ink-800 hover:bg-slate-100">
+            <History className="w-4 h-4" /> History
+          </button>
+          <button onClick={() => navigate('/chat')} className="ml-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-ink-800 hover:bg-slate-100">
+            <Plus className="w-4 h-4" /> New
+          </button>
         </div>
 
-        <form onSubmit={sendMessage} className="p-4 border-t bg-white">
-          <div className="flex space-x-4">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about Indian laws, legal procedures, or rights..."
-              className="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              disabled={loading}
-            />
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
-            >
-              {loading ? 'Processing...' : <Send className="w-5 h-5" />}
-            </button>
+        <div className="flex-1 overflow-y-auto">
+          {messages.length === 0 ? (
+            <div className="min-h-full flex flex-col items-center justify-center px-5 py-10 text-center">
+              <Courthouse tone="light" className="w-56 h-auto mb-6" />
+              <h2 className="font-display text-3xl sm:text-4xl font-semibold tracking-tight text-ink-900">What would you like to know?</h2>
+              <p className="mt-2 text-slate-600 max-w-md">Ask about Indian laws, legal procedures or your rights, and get a clear answer you can act on.</p>
+              <div className="mt-8 grid sm:grid-cols-2 gap-3 w-full max-w-2xl text-left">
+                {suggestions.map(({ icon: Icon, title, text }) => (
+                  <button
+                    key={title}
+                    onClick={() => submit(text)}
+                    disabled={loading}
+                    className="group flex items-start gap-3 rounded-xl border border-line bg-white p-4 shadow-card hover:border-brass-400 transition-colors disabled:opacity-60"
+                  >
+                    <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ink-800 text-brass-400">
+                      <Icon className="w-[18px] h-[18px]" />
+                    </span>
+                    <span>
+                      <span className="block text-[15px] font-semibold text-ink-900">{title}</span>
+                      <span className="block mt-0.5 text-[13.5px] leading-snug text-slate-600">{text}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-3xl mx-auto w-full px-4 sm:px-6 py-8 space-y-7">
+              {messages.map((message, i) => {
+                const isUser = message.role === 'user';
+                const waiting = !isUser && loading && !message.content && i === messages.length - 1;
+                const failed = message.content.startsWith('Sorry, something went wrong');
+                return (
+                  <div key={message.id} className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
+                    {!isUser && <Logo className="w-8 h-8 shrink-0 mt-0.5" />}
+                    <div className={`min-w-0 ${isUser ? 'max-w-[85%]' : 'flex-1'}`}>
+                      {isUser ? (
+                        <div className="rounded-2xl rounded-br-md bg-ink-800 px-4 py-3 shadow-card">
+                          <div className="md md-invert"><ReactMarkdown>{message.content}</ReactMarkdown></div>
+                        </div>
+                      ) : (
+                        <div className={`rounded-2xl rounded-tl-md border bg-white px-5 py-4 shadow-card ${failed ? 'border-red-200' : 'border-line'}`}>
+                          {waiting ? (
+                            <div className="flex items-center gap-1.5 py-1" aria-label="Lawsage is thinking">
+                              {[0, 1, 2].map((d) => (
+                                <span key={d} className="typing-dot h-2 w-2 rounded-full bg-brass-500" style={{ animationDelay: `${d * 0.18}s` }} />
+                              ))}
+                            </div>
+                          ) : (
+                            <div className={`md ${failed ? 'text-red-700' : ''}`}><ReactMarkdown>{message.content}</ReactMarkdown></div>
+                          )}
+                          {!loading && !failed && message.content && (
+                            <div className="mt-3 pt-3 border-t border-line flex items-center gap-4">
+                              <button
+                                onClick={() => saveAnswer(i)}
+                                disabled={saved.has(message.id)}
+                                className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-ink-800 disabled:text-emerald-600"
+                              >
+                                {saved.has(message.id) ? <Check className="w-3.5 h-3.5" /> : <Bookmark className="w-3.5 h-3.5" />}
+                                {saved.has(message.id) ? 'Saved' : 'Save'}
+                              </button>
+                              <button onClick={() => copyAnswer(message)} className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-ink-800">
+                                {copied === message.id ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                                {copied === message.id ? 'Copied' : 'Copy'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
+
+        <form onSubmit={sendMessage} className="px-4 sm:px-6 pt-3 pb-4 bg-paper">
+          <div className="max-w-3xl mx-auto">
+            <div className="flex items-center gap-2 rounded-2xl border border-slate-300 bg-white pl-4 pr-2 py-2 shadow-card focus-within:border-brass-500 focus-within:ring-2 focus-within:ring-brass-400/40">
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Ask about Indian laws, legal procedures, or rights…"
+                className="flex-1 min-w-0 bg-transparent py-1.5 text-[15px] text-ink-900 placeholder:text-slate-400 focus:outline-none"
+                disabled={loading}
+              />
+              <button
+                type="submit"
+                disabled={loading || !input.trim()}
+                aria-label="Send message"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-ink-800 text-brass-300 hover:bg-ink-700 disabled:bg-slate-200 disabled:text-slate-400 transition-colors"
+              >
+                <ArrowUp className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="mt-2 text-center text-xs text-slate-500">
+              Lawsage gives general legal information, not legal advice. Consult a qualified lawyer for your specific situation.
+            </p>
           </div>
-          <p className="mt-2 text-sm text-gray-500">
-            Lawsage provides general legal information, not legal advice. Always consult with a qualified lawyer for specific legal matters.
-          </p>
         </form>
       </div>
     </div>

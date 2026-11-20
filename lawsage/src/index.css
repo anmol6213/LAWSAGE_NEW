@@ -2,24 +2,48 @@
 @tailwind components;
 @tailwind utilities;
 
-.prose {
-  max-width: none;
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-paper text-ink-900 font-sans antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+  :focus-visible { outline: 2px solid #C49A45; outline-offset: 2px; }
+  ::selection { background: #E6CC94; color: #0B1626; }
 }
 
-.prose p {
-  margin: 0;
-}
+/* Thin, quiet scrollbars */
+* { scrollbar-width: thin; scrollbar-color: #C9CFDA transparent; }
+.sidebar-scroll { scrollbar-color: #2A4468 transparent; }
 
-.prose pre {
-  margin: 0.5em 0;
-  padding: 0.5em;
-  background-color: #f3f4f6;
-  border-radius: 0.375rem;
-}
+/* Markdown rendered inside answers and law text */
+.md { font-size: 0.95rem; line-height: 1.7; color: inherit; overflow-wrap: anywhere; }
+.md > * + * { margin-top: 0.75em; }
+.md h1, .md h2, .md h3, .md h4 { font-family: Newsreader, Georgia, serif; font-weight: 600; line-height: 1.3; margin-top: 1.1em; }
+.md h1 { font-size: 1.35rem; } .md h2 { font-size: 1.2rem; } .md h3 { font-size: 1.08rem; }
+.md ul { list-style: disc; padding-left: 1.3rem; }
+.md ol { list-style: decimal; padding-left: 1.4rem; }
+.md li + li { margin-top: 0.3em; }
+.md li::marker { color: #C49A45; }
+.md strong { font-weight: 600; }
+.md a { color: #A47E32; text-decoration: underline; text-underline-offset: 2px; }
+.md blockquote { border-left: 3px solid #D8B56D; padding-left: 0.9rem; color: #40608C; font-style: italic; }
+.md hr { border: 0; border-top: 1px solid #E3E6EC; margin: 1.2em 0; }
+.md pre { background: #101F36; color: #F0E1BC; padding: 0.85rem 1rem; border-radius: 0.5rem; overflow-x: auto; font-size: 0.85rem; }
+.md code { background: rgba(196,154,69,.14); color: #7F6125; padding: 0.12em 0.4em; border-radius: 0.25rem; font-size: 0.88em; }
+.md pre code { background: none; color: inherit; padding: 0; }
+.md table { width: 100%; border-collapse: collapse; font-size: 0.9rem; display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid #E3E6EC; padding: 0.4rem 0.7rem; text-align: left; }
+.md th { background: #F4F5F8; font-weight: 600; }
+/* inside the navy user bubble */
+.md-invert { color: #fff; }
+.md-invert a { color: #F0E1BC; }
+.md-invert li::marker { color: #E6CC94; }
+.md-invert code { background: rgba(255,255,255,.14); color: #F0E1BC; }
 
-.prose code {
-  color: #ef4444;
-  background-color: #f3f4f6;
-  padding: 0.2em 0.4em;
-  border-radius: 0.25rem;
+@keyframes typing { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+.typing-dot { animation: typing 1.2s infinite ease-in-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }

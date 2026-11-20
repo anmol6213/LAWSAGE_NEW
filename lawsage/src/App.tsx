@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import type { Session } from '@supabase/supabase-js';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase, hasSupabaseConfig } from './lib/supabase';
 import { Auth } from './components/Auth';
 import { Chat } from './components/Chat';
+import { Logo } from './components/Art';
 import { Navigation } from './components/Navigation';
 import { Header } from './components/Header';
 import { Constitution } from './pages/Constitution';
@@ -12,11 +14,12 @@ import { Profile } from './pages/Profile';
 import { ComingSoon } from './pages/ComingSoon';
 
 function App() {
-  const [session, setSession] = useState(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [navOpen, setNavOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!hasSupabaseConfig) {
+    if (!hasSupabaseConfig || !supabase) {
       setLoading(false);
       return;
     }
@@ -37,27 +40,23 @@ function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-paper">
+        <Logo className="w-12 h-12" />
+        <div className="animate-spin rounded-full h-6 w-6 border-2 border-line border-t-brass-500"></div>
       </div>
     );
   }
 
   if (!hasSupabaseConfig) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="max-w-md w-full mx-4">
-          <div className="bg-white p-8 rounded-lg shadow-md text-center">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Setup Required</h2>
-            <p className="text-gray-600 mb-6">
-              Please click the "Connect to Supabase" button in the top right to set up your Supabase project.
-            </p>
-            <div className="p-4 bg-blue-50 rounded-lg">
-              <p className="text-sm text-blue-700">
-                This will automatically create the necessary configuration for your application.
-              </p>
-            </div>
-          </div>
+      <div className="min-h-screen flex items-center justify-center bg-paper px-4">
+        <div className="max-w-md w-full bg-white p-8 rounded-2xl shadow-card border border-line text-center">
+          <Logo className="w-12 h-12 mx-auto mb-4" />
+          <h2 className="font-display text-2xl font-semibold text-ink-900 mb-2">Setup required</h2>
+          <p className="text-slate-600 text-sm">
+            Add <code className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">VITE_SUPABASE_URL</code> and{' '}
+            <code className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">VITE_SUPABASE_ANON_KEY</code> to your environment variables, then redeploy.
+          </p>
         </div>
       </div>
     );
@@ -69,11 +68,11 @@ function App() {
 
   return (
     <Router>
-      <div className="flex h-screen">
-        <Navigation />
-        <div className="flex-1 flex flex-col">
-          <Header />
-          <main className="flex-1 overflow-auto bg-gray-50">
+      <div className="flex h-screen bg-paper">
+        <Navigation open={navOpen} onClose={() => setNavOpen(false)} />
+        <div className="flex-1 flex flex-col min-w-0">
+          <Header onMenu={() => setNavOpen(true)} />
+          <main className="flex-1 min-h-0 overflow-y-auto bg-paper">
             <Routes>
               <Route path="/chat/:sessionId?" element={<Chat />} />
               <Route path="/database" element={<Database />} />
