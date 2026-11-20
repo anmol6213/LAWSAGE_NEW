@@ -23,6 +23,7 @@ Grounding (very important):
 - When a SOURCES block is provided, it contains the official text of the Constitution of India retrieved from the database. Base your answer on it and cite as (Article N). Quote or paraphrase only what is actually in SOURCES.
 - If SOURCES do not cover the question (for example criminal offences under BNS/BNSS/BSA, which are not loaded yet), say so in one short line and then answer from general knowledge, clearly marked "(general knowledge, please verify)".
 - Never claim that text is in the Constitution unless it appears in SOURCES.
+- Keep answers grounded: put anything that is NOT in SOURCES (case law, interpretations, extra rights) under a separate short heading "General knowledge (please verify)".
 
 How to answer:
 - Start with a direct answer in 1-2 lines, then give details with short headings or bullets.
@@ -49,11 +50,13 @@ async function extractKeywords(message: string): Promise<string> {
   const groq = process.env.GROQ_API_KEY;
   const cerebras = process.env.CEREBRAS_API_KEY;
   const target = groq
-    ? { base: 'https://api.groq.com/openai/v1', key: groq, model: 'llama-3.1-8b-instant' }
+    ? { base: 'https://api.groq.com/openai/v1', key: groq }
     : cerebras
-      ? { base: 'https://api.cerebras.ai/v1', key: cerebras, model: 'llama3.1-8b' }
+      ? { base: 'https://api.cerebras.ai/v1', key: cerebras }
       : null;
   if (!target) return '';
+  const ids = await discoverCompat(target.base, target.key);
+  const model = ids.find((id) => /instant|8b|20b|scout|small|mini/i.test(id)) || ids[0] || 'openai/gpt-oss-20b';
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000);
   try {
@@ -62,9 +65,10 @@ async function extractKeywords(message: string): Promise<string> {
       signal: controller.signal,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${target.key}` },
       body: JSON.stringify({
-        model: target.model,
+        model,
         temperature: 0,
-        max_tokens: 40,
+        max_tokens: 200,
+        ...(/gpt-oss/i.test(model) ? { reasoning_effort: 'low' } : {}),
         messages: [
           {
             role: 'system',
@@ -310,6 +314,25 @@ async function streamClaude(model: string, apiKey: string, message: string, res:
   }
 }
 
+
+// Lists the chat models this key can really use (so we never depend on guessed model names).
+const compatCache: Record<string, string[]> = {};
+async function discoverCompat(base: string, key: string): Promise<string[]> {
+  if (compatCache[base]) return compatCache[base];
+  try {
+    const r = await fetch(`${base}/models`, { headers: { Authorization: `Bearer ${key}` } });
+    const d: any = await r.json();
+    const ids: string[] = (d?.data ?? [])
+      .map((m: any) => String(m?.id ?? ''))
+      .filter((id: string) => id && !/whisper|tts|guard|embed|transcri|safeguard|orpheus|playai|moderation|compound|rerank|image|vision-preview/i.test(id));
+    const rank = (id: string) => (/gpt-oss-120b|llama-3\.3-70b|qwen3?-?.*32b|maverick|kimi/i.test(id) ? 0 : /gpt-oss|llama|scout|qwen/i.test(id) ? 1 : 2);
+    compatCache[base] = ids.sort((a, b) => rank(a) - rank(b)).slice(0, 6);
+  } catch {
+    compatCache[base] = [];
+  }
+  return compatCache[base];
+}
+
 async function streamOpenAICompat(
   label: string,
   baseUrl: string,
@@ -330,6 +353,7 @@ async function streamOpenAICompat(
         model,
         stream: true,
         temperature: 0.3,
+        ...(/gpt-oss/i.test(model) ? { reasoning_effort: 'low' } : {}),
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: message },
@@ -430,24 +454,33 @@ export default async function handler(req: any, res: any) {
       label: 'Groq',
       base: 'https://api.groq.com/openai/v1',
       key: groqKey,
-      models: [process.env.GROQ_MODEL, 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
+      models: [process.env.GROQ_MODEL, 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
     },
     {
       label: 'Cerebras',
       base: 'https://api.cerebras.ai/v1',
       key: cerebrasKey,
-      models: [process.env.CEREBRAS_MODEL, 'gpt-oss-120b', 'llama3.1-8b'],
+      models: [process.env.CEREBRAS_MODEL, 'gpt-oss-120b'],
     },
   ];
   for (const p of compat) {
     if (!p.key) continue;
-    const seen = new Set<string>();
-    for (const m of p.models) {
-      if (!m || seen.has(m)) continue;
-      seen.add(m);
+    const tried = new Set<string>();
+    const queue: string[] = p.models.filter((m): m is string => !!m);
+    let discovered = false;
+    let attempts = 0;
+    while (queue.length && attempts < 4) {
+      const m = queue.shift()!;
+      if (tried.has(m)) continue;
+      tried.add(m);
+      attempts++;
       const r = await streamOpenAICompat(p.label, p.base, p.key, m, prompt, res);
       if (r.ok || r.sent) return finish();
       note(`${p.label} ${m}`, r.error);
+      if (!queue.length && !discovered) {
+        discovered = true;
+        queue.push(...(await discoverCompat(p.base, p.key)));
+      }
     }
   }
 
