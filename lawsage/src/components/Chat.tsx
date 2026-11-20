@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send } from 'lucide-react';
 import { supabase, ChatMessage } from '../lib/supabase';
-import { generateResponse } from '../lib/huggingface';
+import { generateResponse } from '../lib/llm';
 import ReactMarkdown from 'react-markdown';
 
 export const Chat = () => {
