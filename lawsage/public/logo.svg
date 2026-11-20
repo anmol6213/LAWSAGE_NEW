@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Lawsage">
+  <rect width="64" height="64" rx="15" fill="#14243A"/>
+  <path d="M32 12v6M19 21h26M32 18 18 25m28 0L32 18" fill="none" stroke="#D8B56D" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m18 25-7 13h14l-7-13Zm28 0-7 13h14l-7-13Z" fill="none" stroke="#D8B56D" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M11 41h14m12 0h14M32 18v28m-8 5h16" fill="none" stroke="#D8B56D" stroke-width="2.8" stroke-linecap="round"/>
+  <path d="M22 51c3-3 7-4 10-4s7 1 10 4" fill="none" stroke="#F5F0E6" stroke-width="2.2" stroke-linecap="round"/>
+</svg>
