@@ -165,7 +165,6 @@ export const Chat = () => {
         lang
       );
       const { text: finalText, followups: fu } = splitAnswer(raw);
-      setFollowups(fu.length ? fu : FALLBACK_FOLLOWUPS[lang]);
 
       const aiMessage: ChatMessage = {
         id: aiId,
@@ -175,13 +174,15 @@ export const Chat = () => {
         session_id: sessionId,
       };
       setMessages((prev) => prev.map((m) => (m.id === aiId ? aiMessage : m)));
+      setFollowups(fu.length ? fu : FALLBACK_FOLLOWUPS[lang]);
+      setLoading(false); // show chips + action buttons immediately; don't wait for the DB save
 
       const { error } = await supabase.from('messages').insert([newUserMessage, aiMessage]);
       if (error) console.error('Could not save messages:', error);
       else {
         loadConvos();
-        // make the URL point at this conversation without remounting (so a refresh keeps it)
-        if (!sessionParam) window.history.replaceState(null, '', `/chat/${sessionId}`);
+        // make the URL point at this conversation without remounting (keep router history state intact)
+        if (!sessionParam) window.history.replaceState(window.history.state, '', `/chat/${sessionId}`);
       }
     } catch (error) {
       console.error('Error:', error);
