@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send } from 'lucide-react';
 import { supabase, ChatMessage } from '../lib/supabase';
-import { generateResponse } from '../lib/llm';
+import { generateResponseStream } from '../lib/llm';
 import ReactMarkdown from 'react-markdown';
 
 export const Chat = () => {
@@ -37,20 +37,28 @@ export const Chat = () => {
 
     setMessages(prev => [...prev, newUserMessage]);
 
+    const aiId = crypto.randomUUID();
     try {
-      // Generate response using Hugging Face
-      const aiResponse = await generateResponse(userMessage);
-      
-      // Add AI response to chat
+      // Placeholder assistant message that fills in as the answer streams
+      setMessages(prev => [...prev, {
+        id: aiId,
+        content: '_Thinking..._',
+        role: 'assistant',
+        created_at: new Date().toISOString(),
+        session_id: newUserMessage.session_id,
+      }]);
+
+      const aiResponse = await generateResponseStream(userMessage, (text) => {
+        setMessages(prev => prev.map(m => (m.id === aiId ? { ...m, content: text } : m)));
+      });
+
       const aiMessage: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: aiId,
         content: aiResponse,
         role: 'assistant',
         created_at: new Date().toISOString(),
         session_id: newUserMessage.session_id,
       };
-
-      setMessages(prev => [...prev, aiMessage]);
 
       // Save messages to Supabase
       if (supabase) {
@@ -58,13 +66,17 @@ export const Chat = () => {
       }
     } catch (error) {
       console.error('Error:', error);
-      setMessages(prev => [...prev, {
-        id: crypto.randomUUID(),
-        content: 'I apologize, but I encountered an error. Please try again.',
-        role: 'assistant',
-        created_at: new Date().toISOString(),
-        session_id: newUserMessage.session_id,
-      }]);
+      const msg = error instanceof Error ? error.message : 'Please try again.';
+      setMessages(prev => {
+        const without = prev.filter(m => m.id !== aiId);
+        return [...without, {
+          id: crypto.randomUUID(),
+          content: `Sorry, something went wrong: ${msg}`,
+          role: 'assistant' as const,
+          created_at: new Date().toISOString(),
+          session_id: newUserMessage.session_id,
+        }];
+      });
     } finally {
       setLoading(false);
     }

@@ -1,6 +1,10 @@
 import { supabase } from './supabase';
 
-export const generateResponse = async (input: string): Promise<string> => {
+// Streams the answer: onChunk is called with each new piece of text.
+export const generateResponseStream = async (
+  input: string,
+  onChunk: (text: string) => void
+): Promise<string> => {
   const session = supabase ? (await supabase.auth.getSession()).data.session : null;
   const token = session?.access_token;
   if (!token) throw new Error('Please sign in first.');
@@ -14,9 +18,20 @@ export const generateResponse = async (input: string): Promise<string> => {
     body: JSON.stringify({ message: input }),
   });
 
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.text) {
+  if (!res.ok || !res.body) {
+    const data = await res.json().catch(() => ({}));
     throw new Error(data.error || 'Failed to generate response. Please try again.');
   }
-  return data.text as string;
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let full = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = decoder.decode(value, { stream: true });
+    full += chunk;
+    onChunk(full);
+  }
+  return full;
 };
