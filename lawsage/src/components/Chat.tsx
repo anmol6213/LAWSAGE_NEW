@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Plus, Bookmark, Check } from 'lucide-react';
+import { Send, Plus, Bookmark, Check, Pin, Trash2 } from 'lucide-react';
 import { useNavigate, useParams, useLocation, NavLink } from 'react-router-dom';
 import { supabase, ChatMessage } from '../lib/supabase';
 import { generateResponseStream } from '../lib/llm';
 import ReactMarkdown from 'react-markdown';
 
-type Convo = { session_id: string; title: string; created_at: string };
+type Convo = { session_id: string; title: string; created_at: string; pinned: boolean };
 
 export const Chat = () => {
   const { sessionId: sessionParam } = useParams();
@@ -27,11 +27,13 @@ export const Chat = () => {
       .eq('role', 'user')
       .order('created_at', { ascending: true })
       .limit(1000);
+    const { data: pins } = await supabase.from('pinned_chats').select('session_id');
+    const pinned = new Set((pins || []).map((p: { session_id: string }) => p.session_id));
     const map = new Map<string, Convo>();
     (data || []).forEach((r: { session_id: string; content: string; created_at: string }) => {
-      if (!map.has(r.session_id)) map.set(r.session_id, { session_id: r.session_id, title: r.content, created_at: r.created_at });
+      if (!map.has(r.session_id)) map.set(r.session_id, { session_id: r.session_id, title: r.content, created_at: r.created_at, pinned: pinned.has(r.session_id) });
     });
-    setConvos([...map.values()].sort((a, b) => b.created_at.localeCompare(a.created_at)));
+    setConvos([...map.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.created_at.localeCompare(a.created_at)));
   }, []);
 
   useEffect(() => {
@@ -59,6 +61,23 @@ export const Chat = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const togglePin = async (c: Convo) => {
+    const { error } = c.pinned
+      ? await supabase.from('pinned_chats').delete().eq('session_id', c.session_id)
+      : await supabase.from('pinned_chats').insert({ session_id: c.session_id });
+    if (error) console.error('Pin failed:', error);
+    loadConvos();
+  };
+
+  const deleteChat = async (c: Convo) => {
+    if (!window.confirm('Delete this chat? This cannot be undone.')) return;
+    const { error } = await supabase.from('messages').delete().eq('session_id', c.session_id);
+    if (error) return console.error('Delete failed:', error);
+    await supabase.from('pinned_chats').delete().eq('session_id', c.session_id);
+    if (c.session_id === sessionId) navigate('/chat');
+    loadConvos();
+  };
 
   const saveAnswer = async (index: number) => {
     const answer = messages[index];
@@ -139,16 +158,28 @@ export const Chat = () => {
         <div className="flex-1 overflow-y-auto px-2 pb-2">
           {convos.length === 0 && <p className="px-2 text-sm text-gray-500">No past chats yet.</p>}
           {convos.map((c) => (
-            <NavLink
+            <div
               key={c.session_id}
-              to={`/chat/${c.session_id}`}
-              className={`block truncate px-3 py-2 rounded-lg text-sm mb-1 ${
-                c.session_id === sessionId ? 'bg-indigo-100 text-indigo-700' : 'text-gray-700 hover:bg-gray-100'
-              }`}
-              title={c.title}
+              className={`group flex items-center rounded-lg mb-1 ${c.session_id === sessionId ? 'bg-indigo-100 text-indigo-700' : 'text-gray-700 hover:bg-gray-100'}`}
             >
-              {c.title}
-            </NavLink>
+              <NavLink to={`/chat/${c.session_id}`} className="flex-1 min-w-0 truncate px-3 py-2 text-sm" title={c.title}>
+                {c.title}
+              </NavLink>
+              <button
+                onClick={() => togglePin(c)}
+                aria-label={c.pinned ? 'Unpin' : 'Pin'}
+                className={`p-1 ${c.pinned ? 'text-indigo-600' : 'text-gray-400 opacity-0 group-hover:opacity-100'} hover:text-indigo-700`}
+              >
+                <Pin className={`w-4 h-4 ${c.pinned ? 'fill-current' : ''}`} />
+              </button>
+              <button
+                onClick={() => deleteChat(c)}
+                aria-label="Delete chat"
+                className="p-1 mr-1 text-gray-400 opacity-0 group-hover:opacity-100 hover:text-red-600"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
           ))}
         </div>
       </aside>
