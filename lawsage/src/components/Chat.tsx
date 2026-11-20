@@ -7,6 +7,23 @@ import ReactMarkdown from 'react-markdown';
 
 type Convo = { session_id: string; title: string; created_at: string; pinned: boolean };
 
+// Fallback storage for pins, used only if the `pinned_chats` table is missing/blocked in Supabase.
+const LOCAL_PINS_KEY = 'lawsage_pinned_chats';
+const getLocalPins = (): Set<string> => {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(LOCAL_PINS_KEY) || '[]'));
+  } catch {
+    return new Set();
+  }
+};
+const setLocalPins = (pins: Set<string>) => {
+  try {
+    localStorage.setItem(LOCAL_PINS_KEY, JSON.stringify([...pins]));
+  } catch {
+    /* ignore */
+  }
+};
+
 export const Chat = () => {
   const { sessionId: sessionParam } = useParams();
   const location = useLocation();
@@ -27,8 +44,11 @@ export const Chat = () => {
       .eq('role', 'user')
       .order('created_at', { ascending: true })
       .limit(1000);
-    const { data: pins } = await supabase.from('pinned_chats').select('session_id');
-    const pinned = new Set((pins || []).map((p: { session_id: string }) => p.session_id));
+    const { data: pins, error: pinsError } = await supabase.from('pinned_chats').select('session_id');
+    // If the table doesn't exist (404) or is blocked, fall back to local pins so the UI still works.
+    const pinned = pinsError
+      ? getLocalPins()
+      : new Set((pins || []).map((p: { session_id: string }) => p.session_id));
     const map = new Map<string, Convo>();
     (data || []).forEach((r: { session_id: string; content: string; created_at: string }) => {
       if (!map.has(r.session_id)) map.set(r.session_id, { session_id: r.session_id, title: r.content, created_at: r.created_at, pinned: pinned.has(r.session_id) });
@@ -66,7 +86,13 @@ export const Chat = () => {
     const { error } = c.pinned
       ? await supabase.from('pinned_chats').delete().eq('session_id', c.session_id)
       : await supabase.from('pinned_chats').insert({ session_id: c.session_id });
-    if (error) console.error('Pin failed:', error);
+    if (error) {
+      console.error('Pin failed (using local fallback):', error);
+      const local = getLocalPins();
+      if (c.pinned) local.delete(c.session_id);
+      else local.add(c.session_id);
+      setLocalPins(local);
+    }
     loadConvos();
   };
 
@@ -75,6 +101,8 @@ export const Chat = () => {
     const { error } = await supabase.from('messages').delete().eq('session_id', c.session_id);
     if (error) return console.error('Delete failed:', error);
     await supabase.from('pinned_chats').delete().eq('session_id', c.session_id);
+    const local = getLocalPins();
+    if (local.delete(c.session_id)) setLocalPins(local);
     if (c.session_id === sessionId) navigate('/chat');
     loadConvos();
   };
@@ -168,14 +196,14 @@ export const Chat = () => {
               <button
                 onClick={() => togglePin(c)}
                 aria-label={c.pinned ? 'Unpin' : 'Pin'}
-                className={`p-1 ${c.pinned ? 'text-indigo-600' : 'text-gray-400 opacity-0 group-hover:opacity-100'} hover:text-indigo-700`}
+                className={`p-1 ${c.pinned ? 'text-indigo-600' : 'text-gray-400 opacity-0 group-hover:opacity-100 focus:opacity-100'} hover:text-indigo-700`}
               >
                 <Pin className={`w-4 h-4 ${c.pinned ? 'fill-current' : ''}`} />
               </button>
               <button
                 onClick={() => deleteChat(c)}
                 aria-label="Delete chat"
-                className="p-1 mr-1 text-gray-400 opacity-0 group-hover:opacity-100 hover:text-red-600"
+                className="p-1 mr-1 text-gray-400 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-red-600"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
