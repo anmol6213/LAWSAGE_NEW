@@ -225,8 +225,7 @@ async function discoverFlashModels(apiKey: string): Promise<string[]> {
       .filter(
         (m: any) =>
           (m.supportedGenerationMethods ?? []).includes('generateContent') &&
-          /flash/i.test(m.name) &&
-          !/image|tts|live|audio|native|robotics|computer|embedding/i.test(m.name)
+          /^models\/gemini-\d+(\.\d+)?-flash(-lite)?$/i.test(m.name)
       )
       .map((m: any) => String(m.name).replace(/^models\//, ''))
       .sort()
@@ -264,12 +263,16 @@ export default async function handler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-cache, no-transform');
 
   let lastError = 'Model request failed.';
+  const errors: string[] = [];
+  const note = (who: string, e?: string) => {
+    if (e) errors.push(`${who}: ${String(e).replace(/\s+/g, ' ').slice(0, 140)}`);
+  };
 
   // 1) Claude first, if a key is configured
   if (claudeKey) {
     const r = await streamClaude(process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5', claudeKey, message, res);
     if (r.ok || r.sent) return res.end();
-    lastError = r.error || lastError;
+    note('Claude', r.error);
   }
 
   // 2) Groq (free, very fast), then 3) Cerebras (free, fast)
@@ -295,7 +298,7 @@ export default async function handler(req: any, res: any) {
       seen.add(m);
       const r = await streamOpenAICompat(p.label, p.base, p.key, m, message, res);
       if (r.ok || r.sent) return res.end();
-      lastError = r.error || lastError;
+      note(`${p.label} ${m}`, r.error);
     }
   }
 
@@ -313,7 +316,7 @@ export default async function handler(req: any, res: any) {
 
       const r = await streamGemini(model, geminiKey, message, res);
       if (r.ok || r.sent) return res.end();
-      lastError = r.error || lastError;
+      note(`Gemini ${model}`, r.error);
       if (r.fatal) break;
 
       if (!queue.length && !discovered) {
@@ -325,5 +328,8 @@ export default async function handler(req: any, res: any) {
 
   // Nothing worked
   res.removeHeader('Content-Type');
-  return res.status(502).json({ error: lastError });
+  const missing = [!groqKey && 'GROQ_API_KEY', !cerebrasKey && 'CEREBRAS_API_KEY'].filter(Boolean).join(', ');
+  return res.status(502).json({
+    error: `[api v5] ${errors.join(' | ') || lastError}${missing ? ` (not set: ${missing})` : ''}`,
+  });
 }
