@@ -19,6 +19,11 @@ Important, current law (always use these, mention the old law only for compariso
 - Bharatiya Sakshya Adhiniyam, 2023 (BSA) replaced the Indian Evidence Act.
 For offences before 1 July 2024 the old IPC/CrPC/Evidence Act still apply to those cases.
 
+Grounding (very important):
+- When a SOURCES block is provided, it contains the official text of the Constitution of India retrieved from the database. Base your answer on it and cite as (Article N). Quote or paraphrase only what is actually in SOURCES.
+- If SOURCES do not cover the question (for example criminal offences under BNS/BNSS/BSA, which are not loaded yet), say so in one short line and then answer from general knowledge, clearly marked "(general knowledge, please verify)".
+- Never claim that text is in the Constitution unless it appears in SOURCES.
+
 How to answer:
 - Start with a direct answer in 1-2 lines, then give details with short headings or bullets.
 - Cite the Act and section/Article number only when you are confident. Never invent sections, case names or citations. If unsure, say "please verify the exact section".
@@ -27,6 +32,140 @@ How to answer:
 - End with one short line that this is general information, not legal advice.`;
 
 type Result = { ok: boolean; sent: boolean; error?: string; fatal?: boolean };
+
+
+type Source = { ref: string; title: string; part: string; content: string };
+
+function sbHeaders(token: string) {
+  return {
+    apikey: process.env.VITE_SUPABASE_ANON_KEY || '',
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  };
+}
+
+// Turns a question in any language into English search keywords (fast, optional).
+async function extractKeywords(message: string): Promise<string> {
+  const groq = process.env.GROQ_API_KEY;
+  const cerebras = process.env.CEREBRAS_API_KEY;
+  const target = groq
+    ? { base: 'https://api.groq.com/openai/v1', key: groq, model: 'llama-3.1-8b-instant' }
+    : cerebras
+      ? { base: 'https://api.cerebras.ai/v1', key: cerebras, model: 'llama3.1-8b' }
+      : null;
+  if (!target) return '';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  try {
+    const r = await fetch(`${target.base}/chat/completions`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${target.key}` },
+      body: JSON.stringify({
+        model: target.model,
+        temperature: 0,
+        max_tokens: 40,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Convert the user question about Indian law (English, Hindi, Marathi or Hinglish) into 3 to 8 lowercase English search keywords that would appear in the text or title of the relevant Articles of the Constitution of India. Example: "freedom speech expression" or "arrest detention magistrate". Output only the keywords separated by single spaces, no punctuation, no explanation.',
+          },
+          { role: 'user', content: message },
+        ],
+      }),
+    });
+    if (!r.ok) return '';
+    const d: any = await r.json();
+    return String(d?.choices?.[0]?.message?.content ?? '')
+      .toLowerCase()
+      .replace(/[^a-z0-9 ]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120);
+  } catch {
+    return '';
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Finds relevant Constitution text: exact "Article N" lookups + keyword search.
+async function retrieveSources(message: string, token: string): Promise<Source[]> {
+  const base = process.env.VITE_SUPABASE_URL;
+  if (!base) return [];
+  const found: Source[] = [];
+  const seen = new Set<string>();
+  const add = (rows: any[]) => {
+    for (const r of rows ?? []) {
+      if (!r?.ref || seen.has(r.ref)) continue;
+      seen.add(r.ref);
+      found.push({ ref: r.ref, title: r.title ?? '', part: r.part ?? '', content: r.content ?? '' });
+    }
+  };
+
+  try {
+    // a) exact article numbers, e.g. "Article 21", "Articles 14, 15 and 21", "art. 19(1)(a)", "अनुच्छेद 21"
+    const nums = new Set<string>();
+    const listRe = /(?:\barticles?|\bart\.?|अनुच्छेद|कलम)\s*((?:\d{1,3}[A-Za-z]{0,2}(?![A-Za-z])(?:\([^)]*\))*(?:\s*(?:,|and|&|to|व|आणि|और)\s*)?)+)/gi;
+    for (const m of message.matchAll(listRe)) {
+      const cleaned = m[1].replace(/\([^)]*\)/g, ' ');
+      for (const n of cleaned.matchAll(/\d{1,3}[A-Za-z]{0,2}(?![A-Za-z])/g)) nums.add(n[0].toUpperCase());
+    }
+    if (nums.size) {
+      const keys = [...nums].slice(0, 5).map((n) => `coi:${n}`).join(',');
+      const r = await fetch(
+        `${base}/rest/v1/law_chunks?select=ref,title,part,content&ref_key=in.(${encodeURIComponent(keys)})`,
+        { headers: sbHeaders(token) }
+      );
+      if (r.ok) add(await r.json());
+    }
+
+    // b) keyword search (skipped when the user named exact Articles)
+    const keywords = found.length ? '' : await extractKeywords(message);
+    const queries: string[] = [];
+    if (!found.length) {
+      queries.push(keywords);
+      if (/^[\x00-\x7F]+$/.test(message) && message.toLowerCase() !== keywords) queries.push(message.slice(0, 200));
+    }
+    for (const q of queries) {
+      if (!q) continue;
+      const r = await fetch(`${base}/rest/v1/rpc/search_law`, {
+        method: 'POST',
+        headers: sbHeaders(token),
+        body: JSON.stringify({ q, n: 6 }),
+      });
+      if (r.ok) add(await r.json());
+      if (found.length >= 7) break;
+    }
+  } catch (e: any) {
+    console.error('retrieve failed', e?.message);
+  }
+
+  // keep the prompt small (free-tier token limits): Articles first, at most 2 Schedule chunks
+  let budget = 8000;
+  let schedules = 0;
+  const out: Source[] = [];
+  const ordered = [...found.filter((x) => x.part !== 'Schedules'), ...found.filter((x) => x.part === 'Schedules')];
+  for (const s of ordered.slice(0, 7)) {
+    const isSchedule = s.part === 'Schedules';
+    if (isSchedule && schedules >= 2) continue;
+    const content = s.content.slice(0, Math.min(isSchedule ? 1500 : 2500, budget));
+    if (content.length < 50) break;
+    budget -= content.length;
+    if (isSchedule) schedules++;
+    out.push({ ...s, content });
+  }
+  return out;
+}
+
+function buildUserPrompt(message: string, sources: Source[]): string {
+  if (!sources.length) return message;
+  const block = sources
+    .map((s) => `[${s.ref}${s.title ? ' - ' + s.title : ''}${s.part ? ' (' + s.part + ')' : ''}]\n${s.content}`)
+    .join('\n\n');
+  return `SOURCES (Constitution of India, official text):\n${block}\n\nQUESTION:\n${message}`;
+}
 
 async function verifyUser(token: string): Promise<boolean> {
   const url = process.env.VITE_SUPABASE_URL;
@@ -259,6 +398,16 @@ export default async function handler(req: any, res: any) {
     return res.status(400).json({ error: 'Message is empty.' });
   }
 
+  // RAG: fetch relevant Constitution text (never blocks the answer if it fails)
+  const sources = await retrieveSources(message, token);
+  const prompt = buildUserPrompt(message, sources);
+  const finish = () => {
+    if (sources.length) {
+      res.write(`\n\n---\n**Retrieved from the Constitution of India:** ${sources.map((x) => x.ref).join(', ')}`);
+    }
+    return res.end();
+  };
+
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
 
@@ -270,8 +419,8 @@ export default async function handler(req: any, res: any) {
 
   // 1) Claude first, if a key is configured
   if (claudeKey) {
-    const r = await streamClaude(process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5', claudeKey, message, res);
-    if (r.ok || r.sent) return res.end();
+    const r = await streamClaude(process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5', claudeKey, prompt, res);
+    if (r.ok || r.sent) return finish();
     note('Claude', r.error);
   }
 
@@ -296,8 +445,8 @@ export default async function handler(req: any, res: any) {
     for (const m of p.models) {
       if (!m || seen.has(m)) continue;
       seen.add(m);
-      const r = await streamOpenAICompat(p.label, p.base, p.key, m, message, res);
-      if (r.ok || r.sent) return res.end();
+      const r = await streamOpenAICompat(p.label, p.base, p.key, m, prompt, res);
+      if (r.ok || r.sent) return finish();
       note(`${p.label} ${m}`, r.error);
     }
   }
@@ -314,8 +463,8 @@ export default async function handler(req: any, res: any) {
       if (tried.has(model)) continue;
       tried.add(model);
 
-      const r = await streamGemini(model, geminiKey, message, res);
-      if (r.ok || r.sent) return res.end();
+      const r = await streamGemini(model, geminiKey, prompt, res);
+      if (r.ok || r.sent) return finish();
       note(`Gemini ${model}`, r.error);
       if (r.fatal) break;
 
