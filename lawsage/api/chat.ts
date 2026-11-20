@@ -32,7 +32,9 @@ How to answer:
 - Match the user's script: if they write Hindi or Marathi words in English letters (Hinglish / Marathi-English), reply in the same simple roman-letter style with no Devanagari. Use Devanagari only if the user writes in Devanagari. If they write plain English, reply in English.
 - Layout: a short direct answer first, then a clear explanation (with the Article text in simple words), then "General knowledge (please verify)" only if you add anything that is not in SOURCES (for example case law names).
 - Be concise unless the user asks for detail.
-- End with one short line that this is general information, not legal advice.`;
+- End with one short line that this is general information, not legal advice.
+- After that line, add ONE final line in exactly this format and write nothing after it: [[followups: question 1 | question 2 | question 3]]
+  The three questions are short (at most 8 words each) follow-ups the user is likely to ask next, written in the same language and script as your answer.`;
 
 type Result = { ok: boolean; sent: boolean; error?: string; fatal?: boolean };
 
@@ -165,12 +167,20 @@ async function retrieveSources(message: string, token: string): Promise<Source[]
   return out;
 }
 
-function buildUserPrompt(message: string, sources: Source[]): string {
-  if (!sources.length) return message;
+const LANGUAGE_RULES: Record<string, string> = {
+  en: 'Reply in English.',
+  hi: 'Reply in Hindi, written in Devanagari script (keep Article numbers and Act names as they are).',
+  mr: 'Reply in Marathi, written in Devanagari script (keep Article numbers and Act names as they are).',
+};
+
+function buildUserPrompt(message: string, sources: Source[], language = 'auto'): string {
+  const rule = LANGUAGE_RULES[language];
+  const tail = rule ? `\n\nLANGUAGE INSTRUCTION (overrides any earlier language rule): ${rule} Write the follow-up questions in the same language.` : '';
+  if (!sources.length) return message + tail;
   const block = sources
     .map((s) => `[${s.ref}${s.title ? ' - ' + s.title : ''}${s.part ? ' (' + s.part + ')' : ''}]\n${s.content}`)
     .join('\n\n');
-  return `SOURCES (Constitution of India, official text):\n${block}\n\nQUESTION:\n${message}`;
+  return `SOURCES (Constitution of India, official text):\n${block}\n\nQUESTION:\n${message}${tail}`;
 }
 
 async function verifyUser(token: string): Promise<boolean> {
@@ -426,7 +436,8 @@ export default async function handler(req: any, res: any) {
 
   // RAG: fetch relevant Constitution text (never blocks the answer if it fails)
   const sources = await retrieveSources(message, token);
-  const prompt = buildUserPrompt(message, sources);
+  const language = ['en', 'hi', 'mr'].includes(String(req.body?.language)) ? String(req.body.language) : 'auto';
+  const prompt = buildUserPrompt(message, sources, language);
   const finish = () => {
     if (sources.length) {
       res.write(`\n\n---\n**Retrieved from the Constitution of India:** ${sources.map((x) => x.ref).join(', ')}`);

@@ -3,6 +3,8 @@ import type { Session } from '@supabase/supabase-js';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase, hasSupabaseConfig } from './lib/supabase';
 import { Auth } from './components/Auth';
+import { Landing } from './pages/Landing';
+import { Rights } from './pages/Rights';
 import { Chat } from './components/Chat';
 import { Logo } from './components/Art';
 import { Navigation } from './components/Navigation';
@@ -16,6 +18,7 @@ import { ComingSoon } from './pages/ComingSoon';
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [navOpen, setNavOpen] = useState(false);
+  const [view, setView] = useState<'landing' | 'signin' | 'signup'>('landing');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -63,18 +66,20 @@ function App() {
   }
 
   if (!session) {
-    return <Auth />;
+    if (view === 'landing') return <Landing onSignIn={() => setView('signin')} onGetStarted={() => setView('signup')} />;
+    return <Auth key={view} initialMode={view} onBack={() => setView('landing')} />;
   }
 
   return (
     <Router>
-      <div className="flex h-screen bg-paper">
+      <div className="flex h-[100dvh] bg-paper">
         <Navigation open={navOpen} onClose={() => setNavOpen(false)} />
         <div className="flex-1 flex flex-col min-w-0">
           <Header onMenu={() => setNavOpen(true)} />
           <main className="flex-1 min-h-0 overflow-y-auto bg-paper">
             <Routes>
               <Route path="/chat/:sessionId?" element={<Chat />} />
+              <Route path="/rights" element={<Rights />} />
               <Route path="/database" element={<Database />} />
               <Route path="/saved" element={<SavedResponses />} />
               <Route path="/profile" element={<Profile />} />

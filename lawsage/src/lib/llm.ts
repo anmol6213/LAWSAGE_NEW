@@ -3,7 +3,8 @@ import { supabase } from './supabase';
 // Streams the answer: onChunk is called with each new piece of text.
 export const generateResponseStream = async (
   input: string,
-  onChunk: (text: string) => void
+  onChunk: (text: string) => void,
+  language: string = 'auto'
 ): Promise<string> => {
   const session = supabase ? (await supabase.auth.getSession()).data.session : null;
   const token = session?.access_token;
@@ -15,7 +16,7 @@ export const generateResponseStream = async (
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ message: input }),
+    body: JSON.stringify({ message: input, language }),
   });
 
   if (!res.ok || !res.body) {

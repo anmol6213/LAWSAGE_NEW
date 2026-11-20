@@ -1,11 +1,12 @@
 import { NavLink } from 'react-router-dom';
-import { MessageSquare, Database, Bookmark, User, BookOpen, FileText, Landmark, Scale, X } from 'lucide-react';
+import { MessageSquare, Database, Bookmark, User, ShieldCheck, BookOpen, FileText, Landmark, Scale, X } from 'lucide-react';
 import { Courthouse, Logo } from './Art';
 
 type Item = { to: string; label: string; icon: typeof Scale; soon?: boolean };
 
 const workspace: Item[] = [
   { to: '/chat', label: 'AI Chat', icon: MessageSquare },
+  { to: '/rights', label: 'Know Your Rights', icon: ShieldCheck },
   { to: '/database', label: 'Legal Database', icon: Database },
   { to: '/saved', label: 'Saved Responses', icon: Bookmark },
   { to: '/profile', label: 'Profile', icon: User },

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Trash2, Bookmark, Copy, Check } from 'lucide-react';
+import { Trash2, Bookmark, Copy, Check, FileDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import ReactMarkdown from 'react-markdown';
+import { Answer } from '../components/Answer';
+import { ArticleDrawer } from '../components/ArticleDrawer';
+import { exportPdf } from '../lib/export';
 import { supabase } from '../lib/supabase';
 import { PageHeader, EmptyState, btnPrimary } from '../components/ui';
 
@@ -12,6 +14,7 @@ export const SavedResponses = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
+  const [articleKey, setArticleKey] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -39,7 +42,8 @@ export const SavedResponses = () => {
   };
 
   return (
-    <div className="max-w-3xl mx-auto p-5 sm:p-8">
+    <div className="max-w-3xl mx-auto p-4 sm:p-8">
+      {articleKey && <ArticleDrawer refKey={articleKey} onClose={() => setArticleKey(null)} />}
       <PageHeader title="Saved responses" desc="Answers you kept from your chats." />
       {loading && <p className="text-slate-500">Loading…</p>}
       {error && <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
@@ -63,12 +67,15 @@ export const SavedResponses = () => {
                 <button onClick={() => copy(i)} className="p-2 text-slate-300 hover:text-brass-300" aria-label="Copy answer">
                   {copied === i.id ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                 </button>
+                <button onClick={() => exportPdf(i.question, i.answer)} className="p-2 text-slate-300 hover:text-brass-300" aria-label="Download as PDF">
+                  <FileDown className="w-4 h-4" />
+                </button>
                 <button onClick={() => remove(i.id)} className="p-2 text-slate-300 hover:text-red-400" aria-label="Delete saved response">
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
             </div>
-            <div className="px-5 py-4 md"><ReactMarkdown>{i.answer}</ReactMarkdown></div>
+            <div className="px-5 py-4"><Answer text={i.answer} onArticle={setArticleKey} /></div>
           </li>
         ))}
       </ul>

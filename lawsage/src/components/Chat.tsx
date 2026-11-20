@@ -1,10 +1,15 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ArrowUp, Plus, Bookmark, Check, Pin, Trash2, History, X, Copy, Scale, Landmark, Gavel, FileText } from 'lucide-react';
-import { useNavigate, useParams, useLocation, NavLink } from 'react-router-dom';
+import { ArrowUp, Plus, Bookmark, Check, Pin, Trash2, History, X, Copy, Mic, Square, Share2, FileDown, ChevronRight } from 'lucide-react';
+import { useNavigate, useParams, useLocation, NavLink, Link } from 'react-router-dom';
 import { supabase, ChatMessage } from '../lib/supabase';
 import { generateResponseStream } from '../lib/llm';
-import ReactMarkdown from 'react-markdown';
 import { Courthouse, Logo } from './Art';
+import { Answer } from './Answer';
+import { ArticleDrawer } from './ArticleDrawer';
+import { splitAnswer } from '../lib/answer';
+import { LANGS, SPEECH_LANG, FALLBACK_FOLLOWUPS, getLang, saveLang, type Lang } from '../lib/lang';
+import { exportPdf, canShare, shareAnswer } from '../lib/export';
+import { guides } from '../lib/rights';
 
 type Convo = { session_id: string; title: string; created_at: string; pinned: boolean };
 
@@ -38,7 +43,14 @@ export const Chat = () => {
   const [loading, setLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  const [lang, setLang] = useState<Lang>(getLang);
+  const [followups, setFollowups] = useState<string[]>([]);
+  const [articleKey, setArticleKey] = useState<string | null>(null);
+  const [listening, setListening] = useState(false);
+  const recRef = useRef<any>(null);
+  const autoRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const SpeechRec = typeof window !== 'undefined' ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition : null;
 
   const loadConvos = useCallback(async () => {
     const { data } = await supabase
@@ -65,6 +77,7 @@ export const Chat = () => {
 
   // Open an old conversation (/chat/:id) or start a fresh one (/chat)
   useEffect(() => {
+    setFollowups([]);
     if (!sessionParam) {
       setSessionId(crypto.randomUUID());
       setMessages([]);
@@ -121,8 +134,10 @@ export const Chat = () => {
   const submit = async (text: string) => {
     if (!text.trim() || loading) return;
 
+    recRef.current?.stop();
     const userMessage = text.trim();
     setInput('');
+    setFollowups([]);
     setLoading(true);
 
     const newUserMessage: ChatMessage = {
@@ -141,17 +156,25 @@ export const Chat = () => {
         { id: aiId, content: '', role: 'assistant', created_at: new Date().toISOString(), session_id: sessionId },
       ]);
 
-      const aiResponse = await generateResponseStream(userMessage, (text) => {
-        setMessages((prev) => prev.map((m) => (m.id === aiId ? { ...m, content: text } : m)));
-      });
+      const raw = await generateResponseStream(
+        userMessage,
+        (partial) => {
+          const { text: shown } = splitAnswer(partial);
+          setMessages((prev) => prev.map((m) => (m.id === aiId ? { ...m, content: shown } : m)));
+        },
+        lang
+      );
+      const { text: finalText, followups: fu } = splitAnswer(raw);
+      setFollowups(fu.length ? fu : FALLBACK_FOLLOWUPS[lang]);
 
       const aiMessage: ChatMessage = {
         id: aiId,
-        content: aiResponse,
+        content: finalText,
         role: 'assistant',
         created_at: new Date(Date.now() + 1).toISOString(),
         session_id: sessionId,
       };
+      setMessages((prev) => prev.map((m) => (m.id === aiId ? aiMessage : m)));
 
       const { error } = await supabase.from('messages').insert([newUserMessage, aiMessage]);
       if (error) console.error('Could not save messages:', error);
@@ -175,10 +198,52 @@ export const Chat = () => {
     }
   };
 
+  // A guide on the Know your rights page can open Chat with a ready question
+  useEffect(() => {
+    const prompt = (location.state as { prompt?: string } | null)?.prompt;
+    if (prompt && autoRef.current !== location.key) {
+      autoRef.current = location.key;
+      submit(prompt);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
+
+  useEffect(() => () => recRef.current?.stop(), []);
+
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     submit(input);
   };
+
+  const pickLang = (l: Lang) => {
+    setLang(l);
+    saveLang(l);
+  };
+
+  const toggleMic = () => {
+    if (listening) {
+      recRef.current?.stop();
+      return;
+    }
+    if (!SpeechRec) return;
+    const rec = new SpeechRec();
+    rec.lang = SPEECH_LANG[lang];
+    rec.interimResults = true;
+    rec.continuous = false;
+    const base = input ? input.trimEnd() + ' ' : '';
+    rec.onresult = (e: any) => {
+      let t = '';
+      for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
+      setInput(base + t);
+    };
+    rec.onerror = () => setListening(false);
+    rec.onend = () => setListening(false);
+    recRef.current = rec;
+    rec.start();
+    setListening(true);
+  };
+
+  const questionFor = (index: number) => [...messages.slice(0, index)].reverse().find((m) => m.role === 'user')?.content ?? null;
 
   const copyAnswer = async (m: ChatMessage) => {
     try {
@@ -190,21 +255,16 @@ export const Chat = () => {
     }
   };
 
-  const suggestions = [
-    { icon: Scale, title: 'Explain Article 21', text: 'Explain Article 21 of the Constitution in simple words' },
-    { icon: Gavel, title: 'What happens after an arrest?', text: 'What are my rights if I am arrested in India?' },
-    { icon: FileText, title: 'File an FIR', text: 'How do I file an FIR, and what if the police refuse?' },
-    { icon: Landmark, title: 'Fundamental rights', text: 'List the fundamental rights guaranteed by the Indian Constitution' },
-  ];
-
   const pinnedList = convos.filter((c) => c.pinned);
   const recentList = convos.filter((c) => !c.pinned);
+  const lastIndex = messages.length - 1;
+  const actionBtn = 'flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-ink-800';
 
   const row = (c: Convo) => (
     <div
       key={c.session_id}
       className={`group flex items-center rounded-lg mb-0.5 border-l-2 ${
-        c.session_id === sessionId ? 'bg-ink-800/[0.07] border-brass-500 text-ink-900' : 'border-transparent text-slate-700 hover:bg-slate-100'
+        c.session_id === sessionId ? 'bg-brass-500/10 border-brass-500 text-ink-900' : 'border-transparent text-slate-700 hover:bg-slate-100'
       }`}
     >
       <NavLink to={`/chat/${c.session_id}`} onClick={() => setShowHistory(false)} className="flex-1 min-w-0 truncate pl-3 pr-1 py-2 text-sm" title={c.title}>
@@ -230,10 +290,11 @@ export const Chat = () => {
   return (
     <div className="relative flex h-full">
       {showHistory && <div className="fixed inset-0 z-10 bg-ink-950/40 md:hidden" onClick={() => setShowHistory(false)} aria-hidden />}
+      {articleKey && <ArticleDrawer refKey={articleKey} onClose={() => setArticleKey(null)} />}
 
       {/* History */}
       <aside
-        className={`${showHistory ? 'flex' : 'hidden'} md:flex absolute md:static inset-y-0 left-0 z-20 w-72 md:w-72 flex-col border-r border-line bg-white shadow-lift md:shadow-none`}
+        className={`${showHistory ? 'flex' : 'hidden'} md:flex absolute md:static inset-y-0 left-0 z-20 w-72 flex-col border-r border-line bg-white shadow-lift md:shadow-none`}
       >
         <div className="p-3 flex items-center gap-2">
           <button
@@ -269,45 +330,48 @@ export const Chat = () => {
 
         <div className="flex-1 overflow-y-auto">
           {messages.length === 0 ? (
-            <div className="min-h-full flex flex-col items-center justify-center px-5 py-10 text-center">
-              <Courthouse tone="light" className="w-56 h-auto mb-6" />
+            <div className="min-h-full flex flex-col items-center justify-center px-4 sm:px-5 py-8 text-center">
+              <Courthouse tone="light" className="w-40 sm:w-52 h-auto mb-5" />
               <h2 className="font-display text-3xl sm:text-4xl font-semibold tracking-tight text-ink-900">What would you like to know?</h2>
-              <p className="mt-2 text-slate-600 max-w-md">Ask about Indian laws, legal procedures or your rights, and get a clear answer you can act on.</p>
-              <div className="mt-8 grid sm:grid-cols-2 gap-3 w-full max-w-2xl text-left">
-                {suggestions.map(({ icon: Icon, title, text }) => (
+              <p className="mt-2 text-slate-600 max-w-md">Ask about Indian laws, procedures or your rights. Every Article in an answer opens its official text.</p>
+              <div className="mt-7 grid sm:grid-cols-2 gap-3 w-full max-w-2xl text-left">
+                {guides.slice(0, 4).map((g) => (
                   <button
-                    key={title}
-                    onClick={() => submit(text)}
+                    key={g.id}
+                    onClick={() => submit(g.prompt)}
                     disabled={loading}
-                    className="group flex items-start gap-3 rounded-xl border border-line bg-white p-4 shadow-card hover:border-brass-400 transition-colors disabled:opacity-60"
+                    className="flex items-start gap-3 rounded-xl border border-line bg-white p-4 shadow-card hover:border-brass-400 transition-colors disabled:opacity-60"
                   >
                     <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ink-800 text-brass-400">
-                      <Icon className="w-[18px] h-[18px]" />
+                      <g.icon className="w-[18px] h-[18px]" />
                     </span>
-                    <span>
-                      <span className="block text-[15px] font-semibold text-ink-900">{title}</span>
-                      <span className="block mt-0.5 text-[13.5px] leading-snug text-slate-600">{text}</span>
+                    <span className="min-w-0">
+                      <span className="block text-[15px] font-semibold text-ink-900">{g.title}</span>
+                      <span className="block mt-0.5 text-[13.5px] leading-snug text-slate-600">{g.summary}</span>
                     </span>
                   </button>
                 ))}
               </div>
+              <Link to="/rights" className="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-brass-700 hover:text-brass-600">
+                See all rights guides <ChevronRight className="w-4 h-4" />
+              </Link>
             </div>
           ) : (
-            <div className="max-w-3xl mx-auto w-full px-4 sm:px-6 py-8 space-y-7">
+            <div className="max-w-3xl mx-auto w-full px-3 sm:px-6 py-6 sm:py-8 space-y-6 sm:space-y-7">
               {messages.map((message, i) => {
                 const isUser = message.role === 'user';
-                const waiting = !isUser && loading && !message.content && i === messages.length - 1;
+                const waiting = !isUser && loading && !message.content && i === lastIndex;
                 const failed = message.content.startsWith('Sorry, something went wrong');
                 return (
-                  <div key={message.id} className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
-                    {!isUser && <Logo className="w-8 h-8 shrink-0 mt-0.5" />}
-                    <div className={`min-w-0 ${isUser ? 'max-w-[85%]' : 'flex-1'}`}>
+                  <div key={message.id} className={`flex gap-2.5 sm:gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
+                    {!isUser && <Logo className="w-8 h-8 shrink-0 mt-0.5 hidden sm:block" />}
+                    <div className={`min-w-0 ${isUser ? 'max-w-[88%] sm:max-w-[85%]' : 'flex-1'}`}>
                       {isUser ? (
                         <div className="rounded-2xl rounded-br-md bg-ink-800 px-4 py-3 shadow-card">
-                          <div className="md md-invert"><ReactMarkdown>{message.content}</ReactMarkdown></div>
+                          <Answer text={message.content} invert />
                         </div>
                       ) : (
-                        <div className={`rounded-2xl rounded-tl-md border bg-white px-5 py-4 shadow-card ${failed ? 'border-red-200' : 'border-line'}`}>
+                        <div className={`rounded-2xl rounded-tl-md border bg-white px-4 sm:px-5 py-4 shadow-card ${failed ? 'border-red-200' : 'border-line'}`}>
                           {waiting ? (
                             <div className="flex items-center gap-1.5 py-1" aria-label="Lawsage is thinking">
                               {[0, 1, 2].map((d) => (
@@ -315,22 +379,41 @@ export const Chat = () => {
                               ))}
                             </div>
                           ) : (
-                            <div className={`md ${failed ? 'text-red-700' : ''}`}><ReactMarkdown>{message.content}</ReactMarkdown></div>
+                            <div className={failed ? 'text-red-700' : ''}>
+                              <Answer text={message.content} onArticle={failed || (loading && i === lastIndex) ? undefined : setArticleKey} />
+                            </div>
                           )}
                           {!loading && !failed && message.content && (
-                            <div className="mt-3 pt-3 border-t border-line flex items-center gap-4">
-                              <button
-                                onClick={() => saveAnswer(i)}
-                                disabled={saved.has(message.id)}
-                                className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-ink-800 disabled:text-emerald-600"
-                              >
+                            <div className="mt-3 pt-3 border-t border-line flex flex-wrap items-center gap-x-4 gap-y-2">
+                              <button onClick={() => saveAnswer(i)} disabled={saved.has(message.id)} className={`${actionBtn} disabled:text-emerald-600`}>
                                 {saved.has(message.id) ? <Check className="w-3.5 h-3.5" /> : <Bookmark className="w-3.5 h-3.5" />}
                                 {saved.has(message.id) ? 'Saved' : 'Save'}
                               </button>
-                              <button onClick={() => copyAnswer(message)} className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-ink-800">
+                              <button onClick={() => copyAnswer(message)} className={actionBtn}>
                                 {copied === message.id ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                                 {copied === message.id ? 'Copied' : 'Copy'}
                               </button>
+                              <button onClick={() => exportPdf(questionFor(i), message.content)} className={actionBtn}>
+                                <FileDown className="w-3.5 h-3.5" /> PDF
+                              </button>
+                              {canShare() && (
+                                <button onClick={() => shareAnswer(questionFor(i), message.content)} className={actionBtn}>
+                                  <Share2 className="w-3.5 h-3.5" /> Share
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {!loading && i === lastIndex && !failed && followups.length > 0 && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {followups.map((f) => (
+                                <button
+                                  key={f}
+                                  onClick={() => submit(f)}
+                                  className="rounded-full border border-brass-500/60 bg-brass-500/10 px-3.5 py-1.5 text-left text-sm text-ink-800 hover:bg-brass-500/20 transition-colors"
+                                >
+                                  {f}
+                                </button>
+                              ))}
                             </div>
                           )}
                         </div>
@@ -344,17 +427,49 @@ export const Chat = () => {
           )}
         </div>
 
-        <form onSubmit={sendMessage} className="px-4 sm:px-6 pt-3 pb-4 bg-paper">
+        <form onSubmit={sendMessage} className="px-3 sm:px-6 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-paper">
           <div className="max-w-3xl mx-auto">
-            <div className="flex items-center gap-2 rounded-2xl border border-slate-300 bg-white pl-4 pr-2 py-2 shadow-card focus-within:border-brass-500 focus-within:ring-2 focus-within:ring-brass-400/40">
+            <div className="mb-2 flex items-center gap-2 text-xs text-slate-500">
+              <span className="shrink-0">Answer in</span>
+              <div className="flex rounded-lg bg-slate-200/70 p-0.5" role="radiogroup" aria-label="Answer language">
+                {LANGS.map((l) => (
+                  <button
+                    key={l.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={lang === l.id}
+                    title={l.full}
+                    onClick={() => pickLang(l.id)}
+                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${lang === l.id ? 'bg-white text-ink-900 shadow-sm' : 'text-slate-600 hover:text-ink-900'}`}
+                  >
+                    {l.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 rounded-2xl border border-slate-300 bg-white pl-4 pr-2 py-2 shadow-card focus-within:border-brass-500 focus-within:ring-2 focus-within:ring-brass-400/40">
               <input
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask about Indian laws, legal procedures, or rights…"
-                className="flex-1 min-w-0 bg-transparent py-1.5 text-[15px] text-ink-900 placeholder:text-slate-400 focus:outline-none"
+                placeholder={listening ? 'Listening…' : 'Ask about Indian laws, procedures, or rights…'}
+                className="flex-1 min-w-0 bg-transparent py-1.5 text-base sm:text-[15px] text-ink-900 placeholder:text-slate-400 focus:outline-none"
                 disabled={loading}
               />
+              {SpeechRec && (
+                <button
+                  type="button"
+                  onClick={toggleMic}
+                  disabled={loading}
+                  aria-label={listening ? 'Stop recording' : 'Speak your question'}
+                  title={`Speak your question (${SPEECH_LANG[lang]})`}
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                    listening ? 'bg-red-500 text-white animate-pulse' : 'text-slate-500 hover:bg-slate-100 hover:text-ink-800'
+                  }`}
+                >
+                  {listening ? <Square className="w-4 h-4 fill-current" /> : <Mic className="w-5 h-5" />}
+                </button>
+              )}
               <button
                 type="submit"
                 disabled={loading || !input.trim()}
@@ -365,7 +480,7 @@ export const Chat = () => {
               </button>
             </div>
             <p className="mt-2 text-center text-xs text-slate-500">
-              Lawsage gives general legal information, not legal advice. Consult a qualified lawyer for your specific situation.
+              General legal information, not legal advice. Consult a qualified lawyer for your situation.
             </p>
           </div>
         </form>

@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { LogOut, Menu } from 'lucide-react';
+import { LogOut, Menu, Moon, Sun } from 'lucide-react';
+import { applyTheme, getTheme, type Theme } from '../lib/theme';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
 const titles: Record<string, string> = {
   chat: 'AI Chat',
+  rights: 'Know Your Rights',
   database: 'Legal Database',
   saved: 'Saved Responses',
   profile: 'Profile',
@@ -17,6 +19,12 @@ const titles: Record<string, string> = {
 export const Header = ({ onMenu }: { onMenu: () => void }) => {
   const { pathname } = useLocation();
   const [email, setEmail] = useState('');
+  const [theme, setTheme] = useState<Theme>(getTheme);
+  const flip = () => {
+    const t: Theme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(t);
+    applyTheme(t);
+  };
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email || ''));
@@ -37,6 +45,9 @@ export const Header = ({ onMenu }: { onMenu: () => void }) => {
           <span className="w-7 h-7 rounded-full bg-ink-800 text-brass-300 text-xs font-semibold flex items-center justify-center">{initial}</span>
           <span className="text-sm text-slate-600 max-w-[200px] truncate">{email || 'Account'}</span>
         </div>
+        <button onClick={flip} className="rounded-lg p-2 text-ink-800 hover:bg-slate-100" aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
+          {theme === 'dark' ? <Sun className="w-[18px] h-[18px]" /> : <Moon className="w-[18px] h-[18px]" />}
+        </button>
         <button
           onClick={() => supabase.auth.signOut()}
           className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-ink-800 hover:bg-slate-100"

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Eye, EyeOff, Mail, Lock, MessageSquare, BookOpen, Bookmark, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Mail, Lock, MessageSquare, BookOpen, Bookmark, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Courthouse, Logo } from './Art';
 
@@ -9,12 +9,12 @@ const points = [
   { icon: Bookmark, text: 'Save the answers you want to come back to' },
 ];
 
-export const Auth = () => {
+export const Auth = ({ initialMode = 'signin', onBack }: { initialMode?: 'signin' | 'signup'; onBack?: () => void }) => {
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(initialMode === 'signup');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -80,6 +80,11 @@ export const Auth = () => {
       {/* Form panel */}
       <section className="flex items-center justify-center px-5 py-10 sm:px-10">
         <div className="w-full max-w-[26rem]">
+          {onBack && (
+            <button type="button" onClick={onBack} className="mb-6 inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-ink-900">
+              <ArrowLeft className="w-4 h-4" /> Back to home
+            </button>
+          )}
           <div className="lg:hidden flex items-center gap-3 mb-8">
             <Logo className="w-10 h-10" />
             <span className="font-display text-2xl font-semibold text-ink-900 tracking-tight">Lawsage</span>
@@ -116,7 +121,7 @@ export const Auth = () => {
                   id="email" name="email" type="email" required autoComplete="email"
                   value={email} onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
-                  className="w-full rounded-lg border border-slate-300 bg-white pl-10 pr-3 py-2.5 text-[15px] placeholder:text-slate-400 focus:outline-none focus:border-brass-500 focus:ring-2 focus:ring-brass-400/40"
+                  className="w-full rounded-lg border border-slate-300 bg-white pl-10 pr-3 py-2.5 text-base sm:text-[15px] placeholder:text-slate-400 focus:outline-none focus:border-brass-500 focus:ring-2 focus:ring-brass-400/40"
                 />
               </div>
             </div>
@@ -130,7 +135,7 @@ export const Auth = () => {
                   autoComplete={isSignUp ? 'new-password' : 'current-password'}
                   value={password} onChange={(e) => setPassword(e.target.value)}
                   placeholder={isSignUp ? 'At least 6 characters' : 'Your password'}
-                  className="w-full rounded-lg border border-slate-300 bg-white pl-10 pr-11 py-2.5 text-[15px] placeholder:text-slate-400 focus:outline-none focus:border-brass-500 focus:ring-2 focus:ring-brass-400/40"
+                  className="w-full rounded-lg border border-slate-300 bg-white pl-10 pr-11 py-2.5 text-base sm:text-[15px] placeholder:text-slate-400 focus:outline-none focus:border-brass-500 focus:ring-2 focus:ring-brass-400/40"
                 />
                 <button
                   type="button" onClick={() => setShow(!show)}
