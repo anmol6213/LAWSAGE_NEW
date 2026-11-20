@@ -5,6 +5,11 @@ import { Auth } from './components/Auth';
 import { Chat } from './components/Chat';
 import { Navigation } from './components/Navigation';
 import { Header } from './components/Header';
+import { Constitution } from './pages/Constitution';
+import { Database } from './pages/Database';
+import { SavedResponses } from './pages/Saved';
+import { Profile } from './pages/Profile';
+import { ComingSoon } from './pages/ComingSoon';
 
 function App() {
   const [session, setSession] = useState(null);
@@ -70,7 +75,15 @@ function App() {
           <Header />
           <main className="flex-1 overflow-auto bg-gray-50">
             <Routes>
-              <Route path="/chat" element={<Chat />} />
+              <Route path="/chat/:sessionId?" element={<Chat />} />
+              <Route path="/database" element={<Database />} />
+              <Route path="/saved" element={<SavedResponses />} />
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/constitution" element={<Constitution />} />
+              <Route path="/central-acts" element={<ComingSoon title="Central Acts" note="Central Acts will be added once the data is loaded." />} />
+              <Route path="/state-acts" element={<ComingSoon title="State Acts" note="State Acts will be added once the data is loaded." />} />
+              <Route path="/judgments" element={<ComingSoon title="Supreme Court Judgments" note="Judgments will be added once the data is loaded." />} />
+              <Route path="*" element={<Navigate to="/chat" replace />} />
               <Route path="/" element={<Navigate to="/chat" replace />} />
             </Routes>
           </main>
