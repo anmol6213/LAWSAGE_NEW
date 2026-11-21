@@ -80,7 +80,7 @@ async function extractKeywords(message: string): Promise<string> {
           {
             role: 'system',
             content:
-              'Convert the user question about Indian law (English, Hindi, Marathi or Hinglish) into 3 to 8 lowercase English search keywords that would appear in the text or title of the relevant provisions of Indian law (Articles of the Constitution or sections of Acts such as BNS, BNSS, BSA, the Domestic Violence Act, RTI Act). Example: "freedom speech expression" or "domestic violence protection order residence". Output only the keywords separated by single spaces, no punctuation, no explanation.',
+              'Convert the user question about Indian law (English, Hindi, Marathi or Hinglish) into 3 to 8 lowercase English search keywords that would appear in the text or title of the relevant provisions of Indian law (Articles of the Constitution or sections of Acts such as BNS, BNSS, BSA, the Domestic Violence Act, RTI Act). Describe the legal concept, not the words used: "husband beats wife" = "domestic violence cruelty protection order"; "police arrested me" = "arrest without warrant rights". Example: "freedom speech expression" or "domestic violence protection order residence". Output only the keywords separated by single spaces, no punctuation, no explanation.',
           },
           { role: 'user', content: message },
         ],
@@ -217,7 +217,8 @@ async function retrieveSources(message: string, token: string): Promise<Source[]
 
     // c) hybrid search (skipped when the user named exact provisions)
     if (!found.length) {
-      const [keywords, qe] = await Promise.all([extractKeywords(message), embedQuery(message)]);
+      const keywords = await extractKeywords(message);
+      const qe = await embedQuery(keywords ? `${keywords}. ${message}` : message);
       const q = keywords || (/^[\x00-\x7F]+$/.test(message) ? message.slice(0, 200) : '');
       let rows: any[] | null = null;
       if (q || qe) {
@@ -356,7 +357,7 @@ async function streamGemini(model: string, apiKey: string, message: string, res:
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
           contents: [{ role: 'user', parts: [{ text: message }] }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
+          generationConfig: { temperature: 0.3, maxOutputTokens: 8192 },
         }),
       }
     );
@@ -399,7 +400,7 @@ async function streamClaude(model: string, apiKey: string, message: string, res:
       },
       body: JSON.stringify({
         model,
-        max_tokens: 2048,
+        max_tokens: 4096,
         stream: true,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: message }],
