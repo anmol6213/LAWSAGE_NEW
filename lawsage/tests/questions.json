@@ -1,0 +1,17 @@
+[
+  {"q": "What legal protection does a woman have against domestic violence in India?", "expect": ["pwdva:3", "pwdva:12", "pwdva:18", "pwdva:19", "pwdva:20"]},
+  {"q": "Can a woman be thrown out of her husband's house?", "expect": ["pwdva:17", "pwdva:19"]},
+  {"q": "What is the punishment for cruelty by husband or his relatives?", "expect": ["bns:85", "bns:86"]},
+  {"q": "What is the right to life and personal liberty?", "expect": ["coi:21"]},
+  {"q": "Freedom of speech and expression", "expect": ["coi:19"]},
+  {"q": "How do I file an RTI application?", "expect": ["rti:6"]},
+  {"q": "Within how many days must a public authority reply to an RTI request?", "expect": ["rti:7"]},
+  {"q": "Which information is exempt from disclosure under RTI?", "expect": ["rti:8"]},
+  {"q": "What can I do if my RTI request is rejected?", "expect": ["rti:19"]},
+  {"q": "Can police arrest without a warrant?", "expect": ["bnss:35"]},
+  {"q": "What is the punishment for murder?", "expect": ["bns:103", "bns:101"]},
+  {"q": "What is the punishment for theft?", "expect": ["bns:303"]},
+  {"q": "What is the punishment for cheating?", "expect": ["bns:318"]},
+  {"q": "What is dowry death?", "expect": ["bns:80"]},
+  {"q": "Pati mala marhan karto, kay kayda aahe?", "expect": ["pwdva:3", "pwdva:18", "bns:85"]}
+]
