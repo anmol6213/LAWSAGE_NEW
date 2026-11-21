@@ -12,13 +12,6 @@ Steps (run in this order, from the project folder):
   python scripts/crawl_indiacode.py ingest --embed --limit 50 # parse + embed + upsert (needs SUPABASE_*/GEMINI_API_KEY env)
   python scripts/crawl_indiacode.py ingest --dry-run          # parse only, writes out/*.csv, no upload
 
-State Acts (shown on the State Acts page; keeps its own list in data/index_<state>.json, so the Central list is untouched):
-  python scripts/crawl_indiacode.py list --collection <uuid> --jurisdiction maharashtra --limit 30
-  python scripts/crawl_indiacode.py download --jurisdiction maharashtra --only "Rent"
-  python scripts/crawl_indiacode.py ingest --jurisdiction maharashtra --only "Rent" --dry-run
-  python scripts/crawl_indiacode.py ingest --jurisdiction maharashtra --only "Rent" --embed
-(needs rag/acts_browser.sql run once in Supabase first)
-
 --collection UUID : the Acts collection. Default = Central Acts (from indiacode.gov.in/collections/<uuid>).
                     For a State's Acts, open that State's Acts collection page and copy the uuid from the URL.
 Be polite: default 1.5 s between requests. Read the site's Terms of use before bulk downloading.
@@ -175,8 +168,6 @@ def cmd_ingest(a):
         secs = ia.parse_sections(ia.clean_lines(text))
         code, short = code_for(it["title"])
         rows = ia.build_rows(secs, code, short, it["title"], it.get("date") and f"Enacted {it['date']}")
-        for r in rows:
-            r["jurisdiction"] = a.jurisdiction
         if not rows:
             open(os.path.join(DATA, "parse_failed.txt"), "a", encoding="utf-8").write(it["title"] + "\n")
             print(f"[{n}/{len(todo)}] PARSE FAILED: {it['title']}"); continue
@@ -192,7 +183,7 @@ def cmd_ingest(a):
     print(f"done. rows loaded this run: {total_rows}")
 
 def main():
-    global DELAY, INDEX
+    global DELAY
     ap = argparse.ArgumentParser()
     ap.add_argument("step", choices=["list", "download", "ingest"])
     ap.add_argument("--collection", default=CENTRAL_ACTS)
@@ -201,11 +192,8 @@ def main():
     ap.add_argument("--embed", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--delay", type=float, default=1.5)
-    ap.add_argument("--jurisdiction", default="central", help="central (default) or a State, e.g. maharashtra / tamil_nadu")
     a = ap.parse_args()
     DELAY = a.delay
-    a.jurisdiction = re.sub(r"[^a-z0-9_]+", "_", a.jurisdiction.strip().lower()).strip("_") or "central"
-    INDEX = INDEX if a.jurisdiction == "central" else os.path.join(DATA, f"index_{a.jurisdiction}.json")
     {"list": cmd_list, "download": cmd_download, "ingest": cmd_ingest}[a.step](a)
 
 if __name__ == "__main__":

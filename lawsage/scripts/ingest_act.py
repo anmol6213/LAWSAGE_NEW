@@ -21,7 +21,7 @@ Usage:
 Act codes used by the API (api/chat.ts): bns bnss bsa ipc crpc iea pwdva rti ...
 Get the text from India Code (indiacode.nic.in). Always read the dry-run CSV before loading.
 """
-import argparse, csv, os, re, sys, time
+import argparse, csv, hashlib, json, os, re, sys, time
 import requests
 
 SB_URL = (os.environ.get("SUPABASE_URL") or os.environ.get("VITE_SUPABASE_URL") or "").rstrip("/")
@@ -173,37 +173,77 @@ def build_rows(secs, act, short, name, notes):
     return rows
 
 # ---------------------------------------------------------------- embeddings
+CACHE_FILE = os.path.join("data", "embed_cache.json")
+BATCH = 10          # small batches stay under Gemini's per-minute token limit
+PAUSE = 4           # seconds between batches
+
+def _load_cache():
+    try:
+        with open(CACHE_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _save_cache(c):
+    os.makedirs("data", exist_ok=True)
+    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(c, f)
+
 def embed_batch(texts):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{EMBED_MODEL}:batchEmbedContents"
     body = {"requests": [{
         "model": f"models/{EMBED_MODEL}", "content": {"parts": [{"text": t}]},
         "taskType": "RETRIEVAL_DOCUMENT", "outputDimensionality": DIM} for t in texts]}
-    for attempt in range(6):
+    last = ""
+    for attempt in range(8):
         r = requests.post(url, json=body, headers={"x-goog-api-key": GEMINI_KEY}, timeout=60)
         if r.status_code == 429 or r.status_code >= 500:
-            time.sleep(5 * (attempt + 1))
+            last = f"{r.status_code} {r.text[:300]}"
+            wait = 15 * (attempt + 1)
+            print(f"  Gemini says {r.status_code}, waiting {wait}s (try {attempt + 1}/8)")
+            time.sleep(wait)
             continue
         r.raise_for_status()
         return [e["values"] for e in r.json()["embeddings"]]
-    raise RuntimeError("embedding failed after retries")
+    raise RuntimeError(f"embedding failed after retries. Last response: {last}")
 
 def embed_text(row):
     return f"{row['ref']}. {row.get('title') or ''}. {row.get('part') or ''}. {row['content'][:1800]}"
 
 def add_embeddings(rows):
+    """Embeds rows in small batches. Finished vectors are saved to data/embed_cache.json,
+    so if this stops (rate limit, network), just run the same command again and it resumes."""
     if not GEMINI_KEY:
         sys.exit("GEMINI_API_KEY is not set")
-    for i in range(0, len(rows), 50):
-        batch = rows[i:i + 50]
-        vecs = embed_batch([embed_text(r) for r in batch])
+    cache = _load_cache()
+    todo = []
+    for r in rows:
+        t = embed_text(r)
+        k = hashlib.sha1(t.encode("utf-8")).hexdigest()
+        r["_k"], r["_t"] = k, t
+        if k in cache:
+            r["embedding"] = cache[k]
+        else:
+            todo.append(r)
+    print(f"  {len(rows) - len(todo)} cached, {len(todo)} to embed")
+    for i in range(0, len(todo), BATCH):
+        batch = todo[i:i + BATCH]
+        vecs = embed_batch([r["_t"] for r in batch])
         for r, v in zip(batch, vecs):
             r["embedding"] = v
-        print(f"  embedded {min(i + 50, len(rows))}/{len(rows)}")
-        time.sleep(1)
+            cache[r["_k"]] = v
+        _save_cache(cache)
+        print(f"  embedded {min(i + BATCH, len(todo))}/{len(todo)}")
+        time.sleep(PAUSE)
+    for r in rows:
+        r.pop("_k", None)
+        r.pop("_t", None)
 
 # ---------------------------------------------------------------- supabase
 def sb_headers(extra=None):
-    h = {"apikey": SB_KEY, "Authorization": f"Bearer {SB_KEY}", "Content-Type": "application/json"}
+    h = {"apikey": SB_KEY, "Content-Type": "application/json"}
+    if not SB_KEY.startswith("sb_"):          # new-style keys (sb_secret_...) are not JWTs: apikey header only
+        h["Authorization"] = f"Bearer {SB_KEY}"
     h.update(extra or {})
     return h
 
