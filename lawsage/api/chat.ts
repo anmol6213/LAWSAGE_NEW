@@ -229,8 +229,12 @@ async function retrieveSources(message: string, token: string): Promise<Source[]
         else console.error('search_law_v2 failed', r.status); // migration not applied yet -> fall back below
       }
       if (rows) {
-        // keep only chunks that really match: all keywords present, or similar enough in meaning
-        add(rows.filter((x) => x.strict_hit || (typeof x.sim === 'number' && x.sim >= MIN_SIM)).slice(0, MAX_SOURCES));
+        // keep only chunks that really match: all keywords present, or similar enough in meaning.
+        // Until embeddings are loaded (no row has a sim value) keep the plain keyword results, like before.
+        const hasVectors = rows.some((x) => typeof x.sim === 'number');
+        add(
+          (hasVectors ? rows.filter((x) => x.strict_hit || (typeof x.sim === 'number' && x.sim >= MIN_SIM)) : rows).slice(0, MAX_SOURCES)
+        );
       } else if (q) {
         const r = await fetch(`${base}/rest/v1/rpc/search_law`, {
           method: 'POST',
