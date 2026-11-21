@@ -1,0 +1,6 @@
+data/pdf/
+data/index.json
+data/ingested.json
+data/needs_ocr.txt
+data/parse_failed.txt
+out/
