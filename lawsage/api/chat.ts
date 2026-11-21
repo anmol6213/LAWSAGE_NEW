@@ -19,17 +19,18 @@ Important, current law (always use these, mention the old law only for compariso
 - Bharatiya Sakshya Adhiniyam, 2023 (BSA) replaced the Indian Evidence Act.
 For offences before 1 July 2024 the old IPC/CrPC/Evidence Act still apply to those cases.
 
-Grounding (very important):
-- When a SOURCES block is provided, it contains the official text of provisions (Articles of the Constitution and sections of Acts) retrieved from the database. Base your answer on it and cite as (Article N) or (Act short name, Section N). Quote or paraphrase only what is actually in SOURCES.
-- Relevance: lead with the statute that actually governs the question. Use a source only if it directly applies; ignore retrieved text that does not fit, and never stretch an Article or section to a topic it does not address. If the Constitution has no specific provision on the topic, say so in one line and move on to the statute.
-- If SOURCES do not cover the question, say so in one short line and then answer from general knowledge, clearly marked "(general knowledge, please verify)".
-- Never claim that text is in an Act or the Constitution unless it appears in SOURCES.
-- Keep answers grounded: put anything that is NOT in SOURCES under a separate short heading "General knowledge (please verify)". Do not cite case law unless you are certain it is directly on point; prefer no case over a loosely related one.
+Grounding (very important, strict):
+- When a SOURCES block is provided, it contains the official text of provisions (Articles of the Constitution and sections of Acts) retrieved from the database. Base your answer on it and cite as (Article N) or (Act short name, Section N).
+- Cite ONLY section or Article numbers that appear in SOURCES. Never state a section number, punishment, time limit or case name from memory, not even in the "General knowledge" part. If an Act is not in SOURCES, do not guess its section numbers (old IPC/CrPC numbers are NOT BNS/BNSS numbers).
+- If SOURCES do not cover part of the question, say so plainly in one line ("This is not in my database yet") and give only plain-language practical guidance for that part, without section numbers.
+- Answer the situation the user actually describes. Do not escalate to a more serious offence (for example, "he beats me" is physical domestic violence, not murder, unless the user says someone was killed).
+- Use a source only if it directly applies; ignore retrieved text that does not fit. If the Constitution has no specific provision on the topic, say so in one line and move on to the statute.
+- Keep legal terms in English even in Hindi/Marathi answers (FIR, Magistrate, Protection Officer, One Stop Centre, DLSA, Domestic Incident Report). Do not translate them literally.
 - For practical legal-help questions (violence, arrest, complaints, consumer or RTI problems) always add short practical steps: where to file (police, Magistrate, Protection Officer, One Stop Centre, DLSA free legal aid), emergency helplines (112, 181 for women), and what evidence or documents to keep.
 
 How to answer:
 - Start with a direct answer in 1-2 lines, then give details with short headings or bullets.
-- Cite the Act and section/Article number only when you are confident. Never invent sections, case names or citations. If unsure, say "please verify the exact section".
+- Cite the Act and section/Article number only when it appears in SOURCES. Never invent sections, case names or citations.
 - Reply in ONE language only. Never repeat the same answer in a second language.
 - Match the user's script: if they write Hindi or Marathi words in English letters (Hinglish / Marathi-English), reply in the same simple roman-letter style with no Devanagari. Use Devanagari only if the user writes in Devanagari. If they write plain English, reply in English.
 - Layout: a short direct answer first, then a clear explanation (with the Article text in simple words), then "General knowledge (please verify)" only if you add anything that is not in SOURCES (for example case law names).
@@ -122,7 +123,7 @@ const NUM = '(\\d{1,3}[A-Za-z]{0,2})(?![A-Za-z0-9])';
 const RE_SEC_THEN_ACT = new RegExp(`${SEC_WORD}\\s*${NUM}(?:\\([^)]*\\))*\\s*(?:of\\s+(?:the\\s+)?)?(${ACT_RE})\\b`, 'gi');
 const RE_ACT_THEN_SEC = new RegExp(`\\b(${ACT_RE})\\s*(?:${SEC_WORD})?\\s*${NUM}`, 'gi');
 const RE_NUM_THEN_ACT = new RegExp(`(?<![\\d.])${NUM}\\s*(?:of\\s+(?:the\\s+)?)?(${ACT_RE})\\b`, 'gi'); // "498A IPC"
-const MIN_SIM = Number(process.env.RAG_MIN_SIM || 0.45); // tune with scripts/eval_rag.py
+const MIN_SIM = Number(process.env.RAG_MIN_SIM || 0.5); // tune with scripts/eval_rag.py
 const MAX_SOURCES = Number(process.env.RAG_MAX_SOURCES || 6);
 
 // Query embedding (multilingual, 768-d). Returns null if no key / failure, then search falls back to keywords only.
@@ -552,12 +553,50 @@ export default async function handler(req: any, res: any) {
     if (e) errors.push(`${who}: ${String(e).replace(/\s+/g, ' ').slice(0, 140)}`);
   };
 
+  // Gemini with automatic fallback to other Flash models (tried FIRST for Hindi/Marathi questions)
+  let geminiTried = false;
+  const runGemini = async (): Promise<boolean> => {
+    if (!geminiKey) return false;
+    geminiTried = true;
+    const tried = new Set<string>();
+    const primary = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+    const queue: string[] = [primary];
+    let discovered = false;
+
+    while (queue.length && tried.size < 4) {
+      const model = queue.shift()!;
+      if (tried.has(model)) continue;
+      tried.add(model);
+
+      const r = await streamGemini(model, geminiKey, prompt, res);
+      if (r.ok || r.sent) {
+        finish();
+        return true;
+      }
+      note(`Gemini ${model}`, r.error);
+      if (r.fatal) break;
+
+      if (!queue.length && !discovered) {
+        discovered = true;
+        queue.push(...(await discoverFlashModels(geminiKey)));
+      }
+    }
+    return false;
+  };
+  const nonEnglish =
+    language === 'hi' ||
+    language === 'mr' ||
+    /[\u0900-\u097F]/.test(message) ||
+    /\b(kay|kaay|aahe|ahe|mala|kayda|kanun|nahi|nahin|hai|mera|mujhe|kya|kaise|kasa|kashi|pati|patni|marhan)\b/i.test(message);
   // 1) Claude first, if a key is configured
   if (claudeKey) {
     const r = await streamClaude(process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5', claudeKey, prompt, res);
     if (r.ok || r.sent) return finish();
     note('Claude', r.error);
   }
+
+  // Hindi/Marathi: Gemini first (better than the small free models)
+  if (nonEnglish && (await runGemini())) return;
 
   // 2) Groq (free, very fast), then 3) Cerebras (free, fast)
   const compat = [
@@ -595,29 +634,8 @@ export default async function handler(req: any, res: any) {
     }
   }
 
-  // 4) Gemini with automatic fallback to other Flash models
-  if (geminiKey) {
-    const tried = new Set<string>();
-    const primary = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-    const queue: string[] = [primary];
-    let discovered = false;
-
-    while (queue.length && tried.size < 4) {
-      const model = queue.shift()!;
-      if (tried.has(model)) continue;
-      tried.add(model);
-
-      const r = await streamGemini(model, geminiKey, prompt, res);
-      if (r.ok || r.sent) return finish();
-      note(`Gemini ${model}`, r.error);
-      if (r.fatal) break;
-
-      if (!queue.length && !discovered) {
-        discovered = true;
-        queue.push(...(await discoverFlashModels(geminiKey)));
-      }
-    }
-  }
+  // 4) Gemini (if not already tried above)
+  if (!geminiTried && (await runGemini())) return;
 
   // Nothing worked
   res.removeHeader('Content-Type');
