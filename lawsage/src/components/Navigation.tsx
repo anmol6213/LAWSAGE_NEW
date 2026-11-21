@@ -14,8 +14,8 @@ const workspace: Item[] = [
 
 const library: Item[] = [
   { to: '/constitution', label: 'Constitution', icon: BookOpen },
-  { to: '/central-acts', label: 'Central Acts', icon: FileText, soon: true },
-  { to: '/state-acts', label: 'State Acts', icon: Landmark, soon: true },
+  { to: '/central-acts', label: 'Central Acts', icon: FileText },
+  { to: '/state-acts', label: 'State Acts', icon: Landmark },
   { to: '/judgments', label: 'Supreme Court Judgments', icon: Scale, soon: true },
 ];
 

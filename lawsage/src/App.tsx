@@ -14,6 +14,8 @@ import { Database } from './pages/Database';
 import { SavedResponses } from './pages/Saved';
 import { Profile } from './pages/Profile';
 import { ComingSoon } from './pages/ComingSoon';
+import { CentralActs } from './pages/CentralActs';
+import { StateActs } from './pages/StateActs';
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -84,8 +86,8 @@ function App() {
               <Route path="/saved" element={<SavedResponses />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/constitution" element={<Constitution />} />
-              <Route path="/central-acts" element={<ComingSoon title="Central Acts" note="Central Acts will be added once the data is loaded." />} />
-              <Route path="/state-acts" element={<ComingSoon title="State Acts" note="State Acts will be added once the data is loaded." />} />
+              <Route path="/central-acts" element={<CentralActs />} />
+              <Route path="/state-acts" element={<StateActs />} />
               <Route path="/judgments" element={<ComingSoon title="Supreme Court Judgments" note="Judgments will be added once the data is loaded." />} />
               <Route path="*" element={<Navigate to="/chat" replace />} />
               <Route path="/" element={<Navigate to="/chat" replace />} />

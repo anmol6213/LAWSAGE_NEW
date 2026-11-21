@@ -12,10 +12,17 @@ Steps (run in this order, from the project folder):
   python scripts/crawl_indiacode.py ingest --embed --limit 50 # parse + embed + upsert (needs SUPABASE_*/GEMINI_API_KEY env)
   python scripts/crawl_indiacode.py ingest --dry-run          # parse only, writes out/*.csv, no upload
 
+State Acts (shown on the State Acts page; keeps its own list in data/index_<state>.json, so the Central list is untouched):
+  python scripts/crawl_indiacode.py list --collection <uuid> --jurisdiction maharashtra --limit 30
+  python scripts/crawl_indiacode.py download --jurisdiction maharashtra --only "Rent"
+  python scripts/crawl_indiacode.py ingest --jurisdiction maharashtra --only "Rent" --dry-run
+  python scripts/crawl_indiacode.py ingest --jurisdiction maharashtra --only "Rent" --embed
+(needs rag/acts_browser.sql run once in Supabase first)
+
 --collection UUID : the Acts collection. Default = Central Acts (from indiacode.gov.in/collections/<uuid>).
                     For a State's Acts, open that State's Acts collection page and copy the uuid from the URL.
 Be polite: default 1.5 s between requests. Read the site's Terms of use before bulk downloading.
-Logs: data/needs_ocr.txt (PDFs with no text), data/parse_failed.txt (no sections found).
+Logs: data/needs_ocr.txt (no text), data/not_english.txt (Hindi/garbled text), data/parse_failed.txt (no sections found).
 """
 import argparse, json, os, re, sys, time
 import requests
@@ -55,6 +62,20 @@ def get(url, **kw):
         time.sleep(DELAY)
         return r
     raise RuntimeError(f"giving up on {url}")
+
+def english_ratio(text):
+    """Share of letters that are plain English letters (Hindi / garbled legacy-font PDFs score ~0)."""
+    alpha = [c for c in text if c.isalpha()]
+    return sum(1 for c in alpha if c.isascii()) / len(alpha) if alpha else 0.0
+
+def pdf_sample_text(data, pages=3):
+    try:
+        from pypdf import PdfReader
+        import io
+        r = PdfReader(io.BytesIO(data))
+        return "\n".join((p.extract_text() or "") for p in r.pages[:pages])
+    except Exception:
+        return ""
 
 def md(item, key):
     v = (item.get("metadata") or {}).get(key) or []
@@ -106,16 +127,23 @@ def cmd_download(a):
     for n, it in enumerate(todo, 1):
         try:
             bundles = get(f"{BASE}/core/items/{it['uuid']}/bundles").json()["_embedded"]["bundles"]
-            orig = next((b for b in bundles if b.get("name") == "ORIGINAL"), bundles[0] if bundles else None)
-            if not orig:
-                print(f"[{n}/{len(todo)}] no files: {it['title']}"); continue
-            bits = get(f"{BASE}/core/bundles/{orig['uuid']}/bitstreams").json()["_embedded"]["bitstreams"]
-            bit = next((b for b in bits if b.get("name", "").lower().endswith(".pdf")), bits[0] if bits else None)
-            if not bit:
+            cands = []
+            for b in bundles:
+                if b.get("name") in ("LICENSE", "THUMBNAIL", "TEXT", "CC-LICENSE"):
+                    continue
+                bits = get(f"{BASE}/core/bundles/{b['uuid']}/bitstreams").json()["_embedded"]["bitstreams"]
+                cands += [x for x in bits if x.get("name", "").lower().endswith(".pdf")]
+            if not cands:
                 print(f"[{n}/{len(todo)}] no pdf: {it['title']}"); continue
-            data = get(f"{BASE}/core/bitstreams/{bit['uuid']}/content").content
-            open(pdf_path(it), "wb").write(data)
-            print(f"[{n}/{len(todo)}] {it['title']}  ({len(data)//1024} KB)")
+            best, best_score, best_name = None, -1.0, ""
+            for bit in cands:            # several PDFs (English / Hindi)? keep the most English-looking one
+                data = get(f"{BASE}/core/bitstreams/{bit['uuid']}/content").content
+                score = english_ratio(pdf_sample_text(data)) if len(cands) > 1 else 1.0
+                if score > best_score:
+                    best, best_score, best_name = data, score, bit.get("name", "")
+            open(pdf_path(it), "wb").write(best)
+            note = f"  picked {best_name} of {len(cands)} PDFs" if len(cands) > 1 else ""
+            print(f"[{n}/{len(todo)}] {it['title']}  ({len(best)//1024} KB){note}")
         except Exception as e:  # keep going; re-run later to retry
             print(f"[{n}/{len(todo)}] FAILED {it['title']}: {e}")
 
@@ -141,9 +169,14 @@ def cmd_ingest(a):
         if len(text.strip()) < 500:
             open(os.path.join(DATA, "needs_ocr.txt"), "a", encoding="utf-8").write(it["title"] + "\n")
             print(f"[{n}/{len(todo)}] NO TEXT (scanned?): {it['title']}"); continue
+        if english_ratio(text) < 0.6:
+            open(os.path.join(DATA, "not_english.txt"), "a", encoding="utf-8").write(it["title"] + "\n")
+            print(f"[{n}/{len(todo)}] NOT ENGLISH TEXT (Hindi/garbled): {it['title']}"); continue
         secs = ia.parse_sections(ia.clean_lines(text))
         code, short = code_for(it["title"])
         rows = ia.build_rows(secs, code, short, it["title"], it.get("date") and f"Enacted {it['date']}")
+        for r in rows:
+            r["jurisdiction"] = a.jurisdiction
         if not rows:
             open(os.path.join(DATA, "parse_failed.txt"), "a", encoding="utf-8").write(it["title"] + "\n")
             print(f"[{n}/{len(todo)}] PARSE FAILED: {it['title']}"); continue
@@ -159,7 +192,7 @@ def cmd_ingest(a):
     print(f"done. rows loaded this run: {total_rows}")
 
 def main():
-    global DELAY
+    global DELAY, INDEX
     ap = argparse.ArgumentParser()
     ap.add_argument("step", choices=["list", "download", "ingest"])
     ap.add_argument("--collection", default=CENTRAL_ACTS)
@@ -168,8 +201,11 @@ def main():
     ap.add_argument("--embed", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--delay", type=float, default=1.5)
+    ap.add_argument("--jurisdiction", default="central", help="central (default) or a State, e.g. maharashtra / tamil_nadu")
     a = ap.parse_args()
     DELAY = a.delay
+    a.jurisdiction = re.sub(r"[^a-z0-9_]+", "_", a.jurisdiction.strip().lower()).strip("_") or "central"
+    INDEX = INDEX if a.jurisdiction == "central" else os.path.join(DATA, f"index_{a.jurisdiction}.json")
     {"list": cmd_list, "download": cmd_download, "ingest": cmd_ingest}[a.step](a)
 
 if __name__ == "__main__":
